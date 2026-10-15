@@ -13,6 +13,7 @@ import com.ivy.data.db.entity.ShoppingListEntity
 import com.ivy.navigation.Navigation
 import com.ivy.navigation.ShoppingListScreen
 import com.ivy.ui.ComposeViewModel
+import com.ivy.ui.FormatMoneyUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -25,11 +26,17 @@ class ShoppingListsViewModel @Inject constructor(
     private val shoppingItemDao: ShoppingItemDao,
     private val writeShoppingListDao: WriteShoppingListDao,
     private val writeShoppingItemDao: WriteShoppingItemDao,
+    /**
+     * Money is rendered by Ivy's own formatter, never with String.format.
+     */
+    private val formatMoney: FormatMoneyUseCase,
 ) : ComposeViewModel<ShoppingListsViewState, ShoppingListsEvent>() {
 
-    private var rows by mutableStateOf<List<ShoppingListRowViewState>>(emptyList())
+    private var templates by mutableStateOf<List<ShoppingListRowViewState>>(emptyList())
+    private var trips by mutableStateOf<List<ShoppingListRowViewState>>(emptyList())
     private var dialogVisible by mutableStateOf(false)
     private var newListName by mutableStateOf("")
+    private var newListIsTemplate by mutableStateOf(false)
 
     init {
         viewModelScope.launch { reload() }
@@ -37,9 +44,11 @@ class ShoppingListsViewModel @Inject constructor(
 
     @Composable
     override fun uiState(): ShoppingListsViewState = ShoppingListsViewState(
-        lists = rows,
+        templates = templates,
+        trips = trips,
         addListDialogVisible = dialogVisible,
         newListName = newListName,
+        newListIsTemplate = newListIsTemplate,
     )
 
     override fun onEvent(event: ShoppingListsEvent) {
@@ -47,14 +56,17 @@ class ShoppingListsViewModel @Inject constructor(
             ShoppingListsEvent.OnBack -> navigation.back()
             ShoppingListsEvent.OnAddListClick -> {
                 newListName = ""
+                newListIsTemplate = false
                 dialogVisible = true
             }
 
             ShoppingListsEvent.OnDismissAddList -> dialogVisible = false
             is ShoppingListsEvent.OnNewListNameChange -> newListName = event.name
+            is ShoppingListsEvent.OnNewListIsTemplateChange -> newListIsTemplate = event.isTemplate
             ShoppingListsEvent.OnCreateList -> createList()
             is ShoppingListsEvent.OnOpenList -> navigation.navigateTo(ShoppingListScreen(event.listId))
             is ShoppingListsEvent.OnDeleteList -> deleteList(event.listId)
+            is ShoppingListsEvent.OnNewTripFromTemplate -> createTripFromTemplate(event.templateId)
         }
     }
 
@@ -64,17 +76,39 @@ class ShoppingListsViewModel @Inject constructor(
             dialogVisible = false
             return
         }
+        val isTemplate = newListIsTemplate
         viewModelScope.launch {
             writeShoppingListDao.save(
                 ShoppingListEntity(
                     name = name,
                     color = DefaultListColor,
-                    orderNum = rows.size.toDouble(),
+                    // Written explicitly either way, so the section a list lands in is never a surprise.
+                    isTemplate = isTemplate,
+                    orderNum = rowCount().toDouble(),
                 )
             )
             dialogVisible = false
             newListName = ""
+            newListIsTemplate = false
             reload()
+        }
+    }
+
+    /**
+     * "New trip from template": the template's items become a brand new trip, and the template itself
+     * is left exactly as it was - it is never ticked and never posted.
+     */
+    private fun createTripFromTemplate(templateId: UUID) {
+        viewModelScope.launch {
+            val template = shoppingListDao.findById(templateId) ?: return@launch
+            val templateItems = shoppingItemDao.findByListId(templateId)
+            val tripId = UUID.randomUUID()
+            writeShoppingListDao.save(
+                template.toNewTrip(id = tripId, orderNum = rowCount().toDouble())
+            )
+            writeShoppingItemDao.save(copiedItemsForTrip(templateItems, tripId))
+            reload()
+            navigation.navigateTo(ShoppingListScreen(tripId))
         }
     }
 
@@ -87,19 +121,28 @@ class ShoppingListsViewModel @Inject constructor(
         }
     }
 
+    private fun rowCount(): Int = templates.size + trips.size
+
     private suspend fun reload() {
-        rows = shoppingListDao.findAll().map { list ->
-            val items = shoppingItemDao.findByListId(list.id)
-            ShoppingListRowViewState(
-                id = list.id,
-                name = list.name,
-                itemsTotal = items.size,
-                itemsChecked = items.count { it.isChecked },
-                estimatedRemaining = items
-                    .filterNot { it.isChecked }
-                    .sumOf { (it.unitPrice ?: 0.0) * it.quantity },
-            )
-        }
+        // The two purpose-built queries keep an archived trip out of the trips section, and a template
+        // out of it as well.
+        templates = shoppingListDao.findTemplates().map { it.toRowViewState() }
+        trips = shoppingListDao.findTrips().map { it.toRowViewState() }
+    }
+
+    private suspend fun ShoppingListEntity.toRowViewState(): ShoppingListRowViewState {
+        val items = shoppingItemDao.findByListId(id)
+        return ShoppingListRowViewState(
+            id = id,
+            name = name,
+            isTemplate = isTemplateList(),
+            itemsTotal = items.size,
+            itemsChecked = items.checkedCount(),
+            estimatedRemainingText = formatMoney.format(
+                items.remainingEstimate(),
+                shortenAmount = false,
+            ),
+        )
     }
 
     private companion object {

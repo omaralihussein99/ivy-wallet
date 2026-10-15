@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -25,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -87,7 +89,9 @@ fun ShoppingListsScreenUi(
     if (viewState.addListDialogVisible) {
         NewListDialog(
             name = viewState.newListName,
+            isTemplate = viewState.newListIsTemplate,
             onNameChange = { onEvent(ShoppingListsEvent.OnNewListNameChange(it)) },
+            onIsTemplateChange = { onEvent(ShoppingListsEvent.OnNewListIsTemplateChange(it)) },
             onConfirm = { onEvent(ShoppingListsEvent.OnCreateList) },
             onDismiss = { onEvent(ShoppingListsEvent.OnDismissAddList) },
         )
@@ -100,20 +104,43 @@ private fun Content(
     onEvent: (ShoppingListsEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (viewState.lists.isEmpty()) {
+    if (viewState.templates.isEmpty() && viewState.trips.isEmpty()) {
         EmptyState(modifier = modifier)
         return
     }
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
-        items(items = viewState.lists, key = { it.id }) { row ->
-            ShoppingListRow(
-                row = row,
-                onOpen = { onEvent(ShoppingListsEvent.OnOpenList(row.id)) },
-                onDelete = { onEvent(ShoppingListsEvent.OnDeleteList(row.id)) },
-            )
-            HorizontalDivider()
+        if (viewState.templates.isNotEmpty()) {
+            item(key = "templates_header") {
+                SectionHeader(text = stringResource(R.string.section_templates))
+            }
+            items(items = viewState.templates, key = { it.id }) { row ->
+                ShoppingListRow(
+                    row = row,
+                    onOpen = { onEvent(ShoppingListsEvent.OnOpenList(row.id)) },
+                    onDelete = { onEvent(ShoppingListsEvent.OnDeleteList(row.id)) },
+                    onNewTrip = { onEvent(ShoppingListsEvent.OnNewTripFromTemplate(row.id)) },
+                )
+                HorizontalDivider()
+            }
         }
+
+        if (viewState.trips.isNotEmpty()) {
+            item(key = "trips_header") {
+                SectionHeader(text = stringResource(R.string.section_trips))
+            }
+            items(items = viewState.trips, key = { it.id }) { row ->
+                ShoppingListRow(
+                    row = row,
+                    onOpen = { onEvent(ShoppingListsEvent.OnOpenList(row.id)) },
+                    onDelete = { onEvent(ShoppingListsEvent.OnDeleteList(row.id)) },
+                    // A trip is already a copy of its template, so it has nothing to start.
+                    onNewTrip = null,
+                )
+                HorizontalDivider()
+            }
+        }
+
         item {
             // Keeps the last row clear of the floating action button.
             Spacer(modifier = Modifier.height(88.dp))
@@ -122,10 +149,23 @@ private fun Content(
 }
 
 @Composable
+private fun SectionHeader(text: String) {
+    Text(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 8.dp),
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+@Composable
 private fun ShoppingListRow(
     row: ShoppingListRowViewState,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
+    onNewTrip: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -151,6 +191,16 @@ private fun ShoppingListRow(
             )
         }
 
+        if (onNewTrip != null) {
+            IconButton(onClick = onNewTrip) {
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = stringResource(R.string.new_trip_from_template),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
         IconButton(onClick = onDelete) {
             Icon(
                 imageVector = Icons.Filled.Delete,
@@ -167,7 +217,7 @@ private fun ShoppingListRowViewState.subtitle(): String {
     return if (itemsTotal == 0) {
         progress
     } else {
-        "$progress  ·  ${formatAmount(estimatedRemaining)}"
+        "$progress  ·  $estimatedRemainingText"
     }
 }
 
@@ -190,7 +240,9 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 @Composable
 private fun NewListDialog(
     name: String,
+    isTemplate: Boolean,
     onNameChange: (String) -> Unit,
+    onIsTemplateChange: (Boolean) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -198,12 +250,34 @@ private fun NewListDialog(
         onDismissRequest = onDismiss,
         title = { Text(text = stringResource(R.string.new_shopping_list)) },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = onNameChange,
-                singleLine = true,
-                label = { Text(text = stringResource(R.string.shopping_list_name)) },
-            )
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    singleLine = true,
+                    label = { Text(text = stringResource(R.string.shopping_list_name)) },
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.save_as_template),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = stringResource(R.string.save_as_template_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = isTemplate,
+                        onCheckedChange = onIsTemplateChange,
+                    )
+                }
+            }
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {

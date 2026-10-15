@@ -46,13 +46,49 @@ class ShoppingCheckoutService @Inject constructor(
         prices: Map<UUID, Double>,
         accountId: UUID,
         categoryId: UUID?,
-    ): Int {
-        val lines = buildCheckoutLines(
+    ): Int = postLines(
+        lines = buildCheckoutLines(
             items = items,
             prices = prices,
             accountId = accountId,
             categoryId = categoryId,
-        )
+        ),
+        items = items,
+    )
+
+    /**
+     * Writes what the checkout sheet reviewed.
+     *
+     * The sheet knows more than a plain trip does: every row carries its own price box, its own account
+     * and its own category, and the trip's name is what the resulting ledger rows are called.
+     * The rules live in [buildDraftLines] so they can be unit tested without Android.
+     */
+    internal suspend fun postTripDrafts(
+        items: List<ShoppingItemEntity>,
+        drafts: List<CheckoutDraft>,
+        priceText: Map<UUID, String>,
+        tripName: String,
+        fallbackAccountId: UUID? = null,
+        fallbackCategoryId: UUID? = null,
+    ): Int = postLines(
+        lines = buildDraftLines(
+            drafts = drafts,
+            priceText = priceText,
+            tripName = tripName,
+            fallbackAccountId = fallbackAccountId,
+            fallbackCategoryId = fallbackCategoryId,
+        ),
+        items = items,
+    )
+
+    /**
+     * The single place where a ledger line is actually written, whichever entry point produced it.
+     */
+    private suspend fun postLines(
+        lines: List<CheckoutLine>,
+        items: List<ShoppingItemEntity>,
+    ): Int {
+        val itemsById = items.associateBy { it.id }
         var posted = 0
         for (line in lines) {
             val account = accountRepository.findById(AccountId(line.accountId)) ?: continue
@@ -61,7 +97,8 @@ class ShoppingCheckoutService @Inject constructor(
             val expense = Expense(
                 id = TransactionId(UUID.randomUUID()),
                 title = NotBlankTrimmedString.from(line.title).getOrNull(),
-                description = null,
+                description = line.description
+                    ?.let { NotBlankTrimmedString.from(it).getOrNull() },
                 category = line.categoryId?.let(::CategoryId),
                 time = Instant.now(),
                 settled = true,
@@ -77,7 +114,7 @@ class ShoppingCheckoutService @Inject constructor(
             )
             transactionRepository.save(expense)
 
-            val item = items.firstOrNull { it.id == line.itemId } ?: continue
+            val item = itemsById[line.itemId] ?: continue
             writeShoppingItemDao.save(
                 item.copy(
                     // Remember the real price so next week's trip doesn't have to ask again.

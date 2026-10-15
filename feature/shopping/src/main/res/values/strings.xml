@@ -14,4 +14,24 @@
     <string name="estimated_left">Estimated left: %1$s</string>
     <string name="items_progress">%1$d of %2$d items</string>
     <string name="shopping_list_gone">This shopping list no longer exists.</string>
+
+    <string name="section_templates">Templates</string>
+    <string name="section_trips">Trips</string>
+    <string name="new_trip_from_template">Start a trip from this template</string>
+    <string name="save_as_template">Save as template</string>
+    <string name="save_as_template_hint">A template is reused. It is never ticked and never posted.</string>
+    <string name="template_label">Template</string>
+    <string name="template_items_count">%1$d items</string>
+
+    <string name="checkout">Checkout</string>
+    <string name="checkout_price">Price</string>
+    <string name="checkout_total">Total</string>
+    <string name="checkout_account">Account</string>
+    <string name="checkout_category">Category</string>
+    <string name="checkout_no_category">No category</string>
+    <string name="checkout_choose_account">Choose account</string>
+    <string name="checkout_skipped">skipped</string>
+    <string name="checkout_summary">%1$d of %2$d items will be posted</string>
+    <string name="checkout_no_options">Nothing to pick from yet.</string>
+    <string name="post_to_ledger">Post to ledger</string>
 </resources>
