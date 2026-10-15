@@ -145,3 +145,15 @@ data object ReleasesScreen : Screen
 data object DisclaimerScreen : Screen
 
 data object PollScreen : Screen
+
+/**
+ * List of all shopping lists. Material3 screen (not legacy).
+ */
+data object ShoppingListsScreen : Screen
+
+/**
+ * A single shopping list with its items. Material3 screen (not legacy).
+ */
+data class ShoppingListScreen(
+    val listId: UUID
+) : Screen

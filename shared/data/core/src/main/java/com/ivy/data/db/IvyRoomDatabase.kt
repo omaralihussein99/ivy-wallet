@@ -11,6 +11,8 @@ import com.ivy.data.db.dao.read.LoanDao
 import com.ivy.data.db.dao.read.LoanRecordDao
 import com.ivy.data.db.dao.read.PlannedPaymentRuleDao
 import com.ivy.data.db.dao.read.SettingsDao
+import com.ivy.data.db.dao.read.ShoppingItemDao
+import com.ivy.data.db.dao.read.ShoppingListDao
 import com.ivy.data.db.dao.read.TagDao
 import com.ivy.data.db.dao.read.TagAssociationDao
 import com.ivy.data.db.dao.read.TransactionDao
@@ -23,6 +25,8 @@ import com.ivy.data.db.dao.write.WriteLoanDao
 import com.ivy.data.db.dao.write.WriteLoanRecordDao
 import com.ivy.data.db.dao.write.WritePlannedPaymentRuleDao
 import com.ivy.data.db.dao.write.WriteSettingsDao
+import com.ivy.data.db.dao.write.WriteShoppingItemDao
+import com.ivy.data.db.dao.write.WriteShoppingListDao
 import com.ivy.data.db.dao.write.WriteTagDao
 import com.ivy.data.db.dao.write.WriteTagAssociationDao
 import com.ivy.data.db.dao.write.WriteTransactionDao
@@ -34,6 +38,8 @@ import com.ivy.data.db.entity.LoanEntity
 import com.ivy.data.db.entity.LoanRecordEntity
 import com.ivy.data.db.entity.PlannedPaymentRuleEntity
 import com.ivy.data.db.entity.SettingsEntity
+import com.ivy.data.db.entity.ShoppingItemEntity
+import com.ivy.data.db.entity.ShoppingListEntity
 import com.ivy.data.db.entity.TagEntity
 import com.ivy.data.db.entity.TagAssociationEntity
 import com.ivy.data.db.entity.TransactionEntity
@@ -44,6 +50,8 @@ import com.ivy.data.db.migration.Migration126to127_LoanRecordType
 import com.ivy.data.db.migration.Migration127to128_PaidForDateRecord
 import com.ivy.data.db.migration.Migration128to129_DeleteIsDeleted
 import com.ivy.data.db.migration.Migration129to130_LoanIncludeNote
+import com.ivy.data.db.migration.Migration130to131_ShoppingList
+import com.ivy.data.db.migration.Migration131to132
 import com.ivy.domain.db.RoomTypeConverters
 import com.ivy.domain.db.migration.Migration105to106_TrnRecurringRules
 import com.ivy.domain.db.migration.Migration106to107_Wishlist
@@ -69,7 +77,8 @@ import com.ivy.domain.db.migration.Migration125to126_Tags
         AccountEntity::class, TransactionEntity::class, CategoryEntity::class,
         SettingsEntity::class, PlannedPaymentRuleEntity::class,
         UserEntity::class, ExchangeRateEntity::class, BudgetEntity::class,
-        LoanEntity::class, LoanRecordEntity::class, TagEntity::class, TagAssociationEntity::class
+        LoanEntity::class, LoanRecordEntity::class, TagEntity::class, TagAssociationEntity::class,
+        ShoppingListEntity::class, ShoppingItemEntity::class
     ],
     autoMigrations = [
         AutoMigration(
@@ -78,7 +87,7 @@ import com.ivy.domain.db.migration.Migration125to126_Tags
             spec = IvyRoomDatabase.DeleteSEMigration::class
         )
     ],
-    version = 130,
+    version = 132,
     exportSchema = true
 )
 @TypeConverters(RoomTypeConverters::class)
@@ -95,6 +104,8 @@ abstract class IvyRoomDatabase : RoomDatabase() {
     abstract val loanRecordDao: LoanRecordDao
     abstract val tagDao: TagDao
     abstract val tagAssociationDao: TagAssociationDao
+    abstract val shoppingListDao: ShoppingListDao
+    abstract val shoppingItemDao: ShoppingItemDao
 
     abstract val writeAccountDao: WriteAccountDao
     abstract val writeTransactionDao: WriteTransactionDao
@@ -107,6 +118,8 @@ abstract class IvyRoomDatabase : RoomDatabase() {
     abstract val writeLoanRecordDao: WriteLoanRecordDao
     abstract val writeTagDao: WriteTagDao
     abstract val writeTagAssociationDao: WriteTagAssociationDao
+    abstract val writeShoppingListDao: WriteShoppingListDao
+    abstract val writeShoppingItemDao: WriteShoppingItemDao
 
     companion object {
         const val DB_NAME = "ivywallet.db"
@@ -135,7 +148,9 @@ abstract class IvyRoomDatabase : RoomDatabase() {
             Migration126to127_LoanRecordType(),
             Migration127to128_PaidForDateRecord(),
             Migration128to129_DeleteIsDeleted(),
-            Migration129to130_LoanIncludeNote()
+            Migration129to130_LoanIncludeNote(),
+            Migration130to131_ShoppingList(),
+            Migration131to132()
         )
 
         @Suppress("SpreadOperator")

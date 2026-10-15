@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shopping_lists">Shopping lists</string>
+    <string name="new_shopping_list">New shopping list</string>
+    <string name="shopping_list_name">Name</string>
+    <string name="create">Create</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
+    <string name="delete_list">Delete list</string>
+    <string name="add_item">Add item</string>
+    <string name="item_name">Item</string>
+    <string name="no_shopping_lists">No shopping lists yet. Tap + to create your first one.</string>
+    <string name="no_shopping_items">Nothing on the list yet. Add the first item below.</string>
+    <string name="estimated_left">Estimated left: %1$s</string>
+    <string name="items_progress">%1$d of %2$d items</string>
+    <string name="shopping_list_gone">This shopping list no longer exists.</string>
+</resources>

@@ -26,6 +26,14 @@ data class AccountEntity(
     @SerialName("includeInBalance")
     val includeInBalance: Boolean = true,
 
+    /**
+     * Optional parent account. A child rolls up into its parent's total; the parent's own balance
+     * is never counted twice, which is the whole point of the hierarchy rule.
+     */
+    @SerialName("parentAccountId")
+    @Serializable(with = KSerializerUUID::class)
+    val parentAccountId: UUID? = null,
+
     @Deprecated("Obsolete field used for cloud sync. Can't be deleted because of backwards compatibility")
     @SerialName("isSynced")
     val isSynced: Boolean = false,
