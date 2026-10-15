@@ -42,6 +42,13 @@ data class ShoppingListEntity(
     @SerialName("currency")
     val currency: String? = null,
 
+    /**
+     * A template is the reusable "original" - the items you buy most weeks. A trip is a working copy
+     * of a template that you tick off and then archive. Templates are never ticked and never posted.
+     */
+    @SerialName("isTemplate")
+    val isTemplate: Boolean? = null,
+
     @SerialName("description")
     val description: String? = null,
 

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 132,
-    "identityHash": "ec1a449873e976f6912eca6a1d1f3308",
+    "identityHash": "4a659da4560e8f229534212e91581007",
     "entities": [
       {
         "tableName": "accounts",
@@ -842,7 +842,7 @@
       },
       {
         "tableName": "shopping_lists",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `accountId` TEXT, `currency` TEXT, `description` TEXT, `color` INTEGER NOT NULL, `icon` TEXT, `orderNum` REAL NOT NULL, `dateTime` INTEGER NOT NULL, `isArchived` INTEGER NOT NULL, `isDeleted` INTEGER NOT NULL, `lastSyncedTime` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `accountId` TEXT, `currency` TEXT, `isTemplate` INTEGER, `description` TEXT, `color` INTEGER NOT NULL, `icon` TEXT, `orderNum` REAL NOT NULL, `dateTime` INTEGER NOT NULL, `isArchived` INTEGER NOT NULL, `isDeleted` INTEGER NOT NULL, `lastSyncedTime` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -866,6 +866,12 @@
             "fieldPath": "currency",
             "columnName": "currency",
             "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isTemplate",
+            "columnName": "isTemplate",
+            "affinity": "INTEGER",
             "notNull": false
           },
           {
@@ -1034,7 +1040,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ec1a449873e976f6912eca6a1d1f3308')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '4a659da4560e8f229534212e91581007')"
     ]
   }
 }
