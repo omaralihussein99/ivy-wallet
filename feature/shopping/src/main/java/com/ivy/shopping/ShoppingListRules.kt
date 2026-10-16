@@ -41,8 +41,8 @@ internal fun List<ShoppingItemEntity>.awaitingPrice(): List<ShoppingItemEntity> 
 /**
  * One expense line to write to the ledger.
  *
- * [title] is what the ledger row is called, [description] is the extra context the row carries when
- * the title alone would hide where the money went.
+ * There is exactly one shape: [title] is the trip's name and [description] is the name of the item
+ * the row came from, so the money is filed under the trip while the row still says what was bought.
  */
 internal data class CheckoutLine(
     val itemId: UUID,
@@ -52,33 +52,6 @@ internal data class CheckoutLine(
     val categoryId: UUID?,
     val description: String? = null,
 )
-
-/**
- * Turns the ticked items plus whatever prices the user entered at the till into the exact ledger
- * lines to write.
- *
- * An item with no price at all is skipped rather than posted as zero, because a zero-amount expense
- * is a lie about the ledger. A price entered at the till wins over the price stored on the item,
- * since the till is where the real number comes from.
- */
-internal fun buildCheckoutLines(
-    items: List<ShoppingItemEntity>,
-    prices: Map<UUID, Double>,
-    accountId: UUID,
-    categoryId: UUID?,
-): List<CheckoutLine> = items
-    .filter { it.isPostable() }
-    .mapNotNull { item ->
-        val price = prices[item.id] ?: item.unitPrice ?: return@mapNotNull null
-        if (price <= 0.0) return@mapNotNull null
-        CheckoutLine(
-            itemId = item.id,
-            title = item.name,
-            amount = price * item.quantity,
-            accountId = accountId,
-            categoryId = item.categoryId ?: categoryId,
-        )
-    }
 
 /**
  * The stored unit price to persist for an item after its line has been posted, so next time the trip

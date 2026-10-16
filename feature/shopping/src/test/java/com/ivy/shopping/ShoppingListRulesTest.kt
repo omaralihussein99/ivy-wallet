@@ -30,6 +30,30 @@ class ShoppingListRulesTest {
         convertedTransactionId = convertedTransactionId,
     )
 
+    /**
+     * The one shape the app posts, driven the way the checkout sheet drives it: ticked items become
+     * drafts, every box is pre-filled from the price stored on the item, and what the user typed into
+     * the box is what finally posts.
+     *
+     * [boxPrices] replaces what the user typed; when it is null every box keeps the price it arrived
+     * pre-filled with, exactly as the screen does it.
+     */
+    private fun draftLines(
+        items: List<ShoppingItemEntity>,
+        tripName: String = "Weekly groceries",
+        boxPrices: Map<UUID, String>? = null,
+        fallbackCategoryId: UUID? = null,
+    ): List<CheckoutLine> {
+        val drafts = checkoutDrafts(items, defaultAccountId = accountId)
+        return buildDraftLines(
+            drafts = drafts,
+            priceText = boxPrices
+                ?: drafts.associate { it.itemId to priceInputText(it.unitPrice) },
+            tripName = tripName,
+            fallbackCategoryId = fallbackCategoryId,
+        )
+    }
+
     @Test
     fun `an unticked item is not postable`() {
         assertFalse(item(isChecked = false).isPostable())
@@ -113,10 +137,12 @@ class ShoppingListRulesTest {
             item(name = "Bread", unitPrice = 3.0, isChecked = true),
         )
 
-        val lines = buildCheckoutLines(items, prices = emptyMap(), accountId = accountId, categoryId = null)
+        val lines = draftLines(items)
 
         assertEquals(2, lines.size)
-        assertEquals(listOf("Milk", "Bread"), lines.map { it.title })
+        // One shape only: the trip names the row, the item it came from is the description.
+        assertEquals(listOf("Weekly groceries", "Weekly groceries"), lines.map { it.title })
+        assertEquals(listOf("Milk", "Bread"), lines.map { it.description })
         assertEquals(8.0, lines[0].amount, 0.0001)
         assertEquals(3.0, lines[1].amount, 0.0001)
     }
@@ -125,47 +151,41 @@ class ShoppingListRulesTest {
     fun `a price entered at the till beats the price stored on the item`() {
         val item = item(name = "Milk", unitPrice = 4.0, isChecked = true)
 
-        val lines = buildCheckoutLines(
-            items = listOf(item),
-            prices = mapOf(item.id to 6.0),
-            accountId = accountId,
-            categoryId = null,
-        )
+        // The box arrives pre-filled with the stored 4.0; the user types 6, and 6 is what posts.
+        val preFilled = draftLines(listOf(item))
+        val typed = draftLines(listOf(item), boxPrices = mapOf(item.id to "6"))
 
-        assertEquals(6.0, lines.single().amount, 0.0001)
+        assertEquals(4.0, preFilled.single().amount, 0.0001)
+        assertEquals(6.0, typed.single().amount, 0.0001)
     }
 
     @Test
     fun `an unpriced item is skipped instead of posting a zero expense`() {
+        // A ticked item with no price leaves an empty box, and an empty box posts nothing at all.
         val items = listOf(item(name = "Milk", unitPrice = null, isChecked = true))
 
-        assertTrue(
-            buildCheckoutLines(items, prices = emptyMap(), accountId = accountId, categoryId = null)
-                .isEmpty()
-        )
+        assertTrue(draftLines(items).isEmpty())
     }
 
     @Test
     fun `unticked items never reach the ledger`() {
         val items = listOf(item(name = "Milk", unitPrice = 4.0, isChecked = false))
 
-        assertTrue(
-            buildCheckoutLines(items, prices = emptyMap(), accountId = accountId, categoryId = null)
-                .isEmpty()
-        )
+        assertTrue(draftLines(items).isEmpty())
     }
 
     @Test
     fun `the item category wins over the list default`() {
+        val listDefaultCategoryId = UUID.randomUUID()
         val items = listOf(
             item(name = "Milk", unitPrice = 1.0, isChecked = true, categoryId = categoryId),
             item(name = "Bread", unitPrice = 1.0, isChecked = true, categoryId = null),
         )
 
-        val lines = buildCheckoutLines(items, prices = emptyMap(), accountId = accountId, categoryId = null)
+        val lines = draftLines(items, fallbackCategoryId = listDefaultCategoryId)
 
-        assertEquals(categoryId, lines.first { it.title == "Milk" }.categoryId)
-        assertEquals(null, lines.first { it.title == "Bread" }.categoryId)
+        assertEquals(categoryId, lines.first { it.description == "Milk" }.categoryId)
+        assertEquals(listDefaultCategoryId, lines.first { it.description == "Bread" }.categoryId)
     }
 
     @Test

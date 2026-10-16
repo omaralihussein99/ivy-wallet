@@ -25,6 +25,10 @@ import javax.inject.Singleton
  * the only representation that keeps each item's own price *and* its own category, which is what makes
  * the report afterwards tell the truth.
  *
+ * That shape has exactly one spelling: the row is titled with the trip's name and the item's name goes
+ * into the row description. The earlier item-titled `postTrip` entry point was deleted rather than kept
+ * in step with it, so there is only one way a trip can reach the ledger.
+ *
  * Every item is stamped with [ShoppingItemEntity.convertedTransactionId] as it is posted, so the same
  * trip can never post twice no matter how many times the user taps.
  */
@@ -34,27 +38,6 @@ class ShoppingCheckoutService @Inject constructor(
     private val accountRepository: AccountRepository,
     private val writeShoppingItemDao: WriteShoppingItemDao,
 ) {
-
-    /**
-     * Writes the trip and returns how many ledger lines were actually created.
-     *
-     * Items that are unticked, already posted, or left without a price are skipped rather than
-     * guessed at, so the returned count can be lower than the number of ticked items.
-     */
-    suspend fun postTrip(
-        items: List<ShoppingItemEntity>,
-        prices: Map<UUID, Double>,
-        accountId: UUID,
-        categoryId: UUID?,
-    ): Int = postLines(
-        lines = buildCheckoutLines(
-            items = items,
-            prices = prices,
-            accountId = accountId,
-            categoryId = categoryId,
-        ),
-        items = items,
-    )
 
     /**
      * Writes what the checkout sheet reviewed.
@@ -82,7 +65,8 @@ class ShoppingCheckoutService @Inject constructor(
     )
 
     /**
-     * The single place where a ledger line is actually written, whichever entry point produced it.
+     * The single place where a ledger line is actually written. Only one shape ever reaches it now: a
+     * row titled with the trip's name and described with the item's name.
      */
     private suspend fun postLines(
         lines: List<CheckoutLine>,
