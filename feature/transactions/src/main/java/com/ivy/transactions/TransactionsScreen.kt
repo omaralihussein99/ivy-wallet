@@ -329,7 +329,8 @@ private fun BoxWithConstraintsScope.UI(
                                     account = account,
                                     baseCurrency = currency,
                                     balance = balance,
-                                    autoFocusKeyboard = false
+                                    autoFocusKeyboard = false,
+                                    hierarchyAccounts = accounts
                                 )
                             }
 
@@ -350,7 +351,8 @@ private fun BoxWithConstraintsScope.UI(
                                     baseCurrency = currency,
                                     balance = balance,
                                     adjustBalanceMode = true,
-                                    autoFocusKeyboard = false
+                                    autoFocusKeyboard = false,
+                                    hierarchyAccounts = accounts
                                 )
                             }
                         }
@@ -367,7 +369,8 @@ private fun BoxWithConstraintsScope.UI(
                             baseCurrency = currency,
                             balance = balance,
                             adjustBalanceMode = false,
-                            autoFocusKeyboard = false
+                            autoFocusKeyboard = false,
+                            hierarchyAccounts = accounts
                         )
                     }
                 )

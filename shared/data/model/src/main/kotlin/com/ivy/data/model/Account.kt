@@ -19,4 +19,13 @@ data class Account(
     val icon: IconAsset?,
     val includeInBalance: Boolean,
     override val orderNum: Double,
+
+    /**
+     * Optional parent account. A child rolls up into its parent's total, and the parent's own balance
+     * is never counted twice - see `com.ivy.data.hierarchy`. Null means "no parent" (a root account).
+     *
+     * Defaulted so the many existing construction sites keep compiling; a site that does not set it
+     * simply produces a root account.
+     */
+    val parentAccountId: AccountId? = null,
 ) : Identifiable<AccountId>, Reorderable

@@ -558,6 +558,15 @@ private fun QuickAccess(
             }
 
             Spacer(Modifier.weight(1f))
+
+            MoreMenuButton(
+                icon = R.drawable.home_more_menu_accounts_hierarchy,
+                label = stringResource(R.string.account_hierarchy_entry),
+            ) {
+                nav.navigateTo(com.ivy.navigation.AccountHierarchyScreen)
+            }
+
+            Spacer(Modifier.weight(1f))
         }
     }
 }

@@ -3,6 +3,9 @@ package com.ivy.legacy.domain.deprecated.logic
 import androidx.compose.ui.graphics.toArgb
 import arrow.core.raise.either
 import com.ivy.data.db.dao.read.AccountDao
+import com.ivy.data.hierarchy.HierarchyNode
+import com.ivy.data.hierarchy.ParentAssignment
+import com.ivy.data.hierarchy.validateParentAssignment
 import com.ivy.data.model.Account
 import com.ivy.data.model.AccountId
 import com.ivy.data.model.primitive.AssetCode
@@ -40,6 +43,7 @@ class AccountCreator @Inject constructor(
                     icon = data.icon?.let(IconAsset::from)?.getOrNull(),
                     includeInBalance = data.includeBalance,
                     orderNum = accountDao.findMaxOrderNum().nextOrderNum(),
+                    parentAccountId = data.parentAccountId?.let(::AccountId),
                 )
             }.getOrNull() ?: return@ioThread
             accountRepository.save(account)
@@ -52,7 +56,8 @@ class AccountCreator @Inject constructor(
                 includeInBalance = data.includeBalance,
                 orderNum = accountDao.findMaxOrderNum().nextOrderNum(),
                 isSynced = false,
-                id = account.id.value
+                id = account.id.value,
+                parentAccountId = data.parentAccountId
             )
             accountLogic.adjustBalance(
                 account = legacyAccount,
@@ -75,7 +80,20 @@ class AccountCreator @Inject constructor(
         ioThread {
             val account = legacyAccount.toDomainAccount(currencyRepository).getOrNull()
                 ?: return@ioThread
-            accountRepository.save(account)
+
+            // The pure hierarchy rules are the backstop behind the parent picker: the editor must never
+            // be able to store a parent that would close a loop. An assignment that the rules reject
+            // keeps the parent that is already stored instead of corrupting the hierarchy.
+            val storedParentId = accountRepository.findById(account.id)?.parentAccountId
+            accountRepository.save(
+                account.copy(
+                    parentAccountId = checkedParent(
+                        requestedParentId = account.parentAccountId,
+                        fallbackParentId = storedParentId,
+                        accountId = account.id,
+                    )
+                )
+            )
 
             accountLogic.adjustBalance(
                 account = updatedLegacyAccount,
@@ -85,5 +103,28 @@ class AccountCreator @Inject constructor(
         }
 
         onRefreshUI()
+    }
+
+    /**
+     * Returns [requestedParentId] only when the pure rules allow it, otherwise [fallbackParentId].
+     * Clearing the parent (`null`) is always allowed.
+     */
+    private suspend fun checkedParent(
+        requestedParentId: AccountId?,
+        fallbackParentId: AccountId?,
+        accountId: AccountId,
+    ): AccountId? {
+        if (requestedParentId == null) return null
+
+        val hierarchy = accountRepository.findAll().map { account ->
+            HierarchyNode(
+                id = account.id,
+                parentId = account.parentAccountId,
+            )
+        }
+        return when (validateParentAssignment(hierarchy, account = accountId, newParent = requestedParentId)) {
+            ParentAssignment.Allowed -> requestedParentId
+            ParentAssignment.Self, ParentAssignment.Cycle -> fallbackParentId
+        }
     }
 }

@@ -27,7 +27,14 @@ data class Account(
     val isSynced: Boolean = false,
     val isDeleted: Boolean = false,
 
-    val id: UUID = UUID.randomUUID()
+    val id: UUID = UUID.randomUUID(),
+
+    /**
+     * Optional parent account (account hierarchy). Carried through this legacy model on purpose:
+     * the repository saves whole entities, so a conversion that dropped the parent id would silently
+     * wipe the hierarchy on the next edit.
+     */
+    val parentAccountId: UUID? = null
 ) {
     fun toEntity(): AccountEntity = AccountEntity(
         name = name,
@@ -38,7 +45,8 @@ data class Account(
         includeInBalance = includeInBalance,
         isSynced = isSynced,
         isDeleted = isDeleted,
-        id = id
+        id = id,
+        parentAccountId = parentAccountId
     )
 
     @Suppress("DataClassFunctions")
@@ -55,6 +63,7 @@ data class Account(
                 icon = icon?.let(IconAsset::from)?.getOrNull(),
                 includeInBalance = includeInBalance,
                 orderNum = orderNum,
+                parentAccountId = parentAccountId?.let(::AccountId),
             )
         }
     }

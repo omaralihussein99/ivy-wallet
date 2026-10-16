@@ -157,3 +157,9 @@ data object ShoppingListsScreen : Screen
 data class ShoppingListScreen(
     val listId: UUID
 ) : Screen
+
+/**
+ * The account hierarchy (parents and their children) as an indented tree, with the rolled-up
+ * balances and the double-count-safe grand total. Material3 screen (not legacy).
+ */
+data object AccountHierarchyScreen : Screen

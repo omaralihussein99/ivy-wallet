@@ -495,4 +495,20 @@
     <string name="bill_paid">Your bill for %1$s %2$s has been paid</string>
     <string name="language">Language</string>
     <string name="advanced_features">Advanced features</string>
+
+    <!-- Account hierarchy (parent/child accounts, rolled-up balances) -->
+    <string name="account_hierarchy_title">Account hierarchy</string>
+    <string name="account_hierarchy_entry">Accounts</string>
+    <string name="account_hierarchy_total">Total (accounts only): %1$s %2$s</string>
+    <string name="account_hierarchy_own">Own: %1$s</string>
+    <string name="account_hierarchy_rolled_up">Rolled up: %1$s</string>
+    <string name="account_hierarchy_parent">Parent: %1$s</string>
+    <string name="account_hierarchy_no_parent">No parent</string>
+    <string name="account_hierarchy_choose_parent">Choose parent account</string>
+    <string name="account_hierarchy_set_parent">Set parent</string>
+    <string name="account_hierarchy_cycle_error">That account is inside this account, so it can\'t be its parent.</string>
+    <string name="account_hierarchy_empty">No accounts yet. Create an account to build a hierarchy.</string>
+    <string name="account_hierarchy_close">Close</string>
+    <string name="account_hierarchy_expand">Expand</string>
+    <string name="account_hierarchy_collapse">Collapse</string>
 </resources>

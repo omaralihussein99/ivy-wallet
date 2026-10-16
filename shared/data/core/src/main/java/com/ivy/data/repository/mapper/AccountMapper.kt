@@ -28,6 +28,9 @@ class AccountMapper @Inject constructor(
             icon = icon?.let(IconAsset::from)?.getOrNull(),
             includeInBalance = includeInBalance,
             orderNum = orderNum,
+            // Carried through on purpose: dropping it here would silently wipe every account's parent
+            // on the next save, since the repository saves whole entities with Upsert.
+            parentAccountId = parentAccountId?.let(::AccountId),
         )
     }
 
@@ -39,6 +42,7 @@ class AccountMapper @Inject constructor(
             icon = icon?.id,
             orderNum = orderNum,
             includeInBalance = includeInBalance,
+            parentAccountId = parentAccountId?.value,
             id = id.value,
             isSynced = true, // TODO: Delete this
         )
