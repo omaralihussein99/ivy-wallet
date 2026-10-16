@@ -15,13 +15,15 @@ missing conversion between Material3's date picker and Ivy's date plumbing.
 `selectedDateMillis` are documented as "UTC milliseconds from the epoch", i.e. a *calendar day* is
 encoded as its **UTC midnight**. Ivy is not: it stores real `Instant`s and resolves their calendar
 day with the app's zone through `TimeConverter`. The picker crossed that boundary with a
-zone-aware conversion on both legs —
-[`AndroidDateTimePicker.kt:55`](shared/ui/core/src/main/java/com/ivy/ui/time/impl/AndroidDateTimePicker.kt:55)
-(`initialSelectedDateMillis = viewState.initialDate?.toEpochMilli()`, the raw instant, so Material3
-displayed the instant's **UTC** day) and
-[`AndroidDateTimePicker.kt:63`](shared/ui/core/src/main/java/com/ivy/ui/time/impl/AndroidDateTimePicker.kt:63)
-(`Instant.ofEpochMilli(selectedDateMillis)` decoded with `TimeConverter.toLocalDate()`, i.e. the UTC
-midnight of the tapped day reinterpreted in the app's zone). Out of that one mismatch: the picker
+zone-aware conversion on both legs — the pre-fix code was
+`initialSelectedDateMillis = viewState.initialDate?.toEpochMilli()` (the raw instant, so Material3
+displayed the instant's **UTC** day) and `Instant.ofEpochMilli(selectedDateMillis)` decoded with
+`TimeConverter.toLocalDate()` (the UTC midnight of the tapped day reinterpreted in the app's zone).
+Those two expressions are now the converted ones at
+[`AndroidDateTimePicker.kt:191`](shared/ui/core/src/main/java/com/ivy/ui/time/impl/AndroidDateTimePicker.kt:191)
+and
+[`AndroidDateTimePicker.kt:202`](shared/ui/core/src/main/java/com/ivy/ui/time/impl/AndroidDateTimePicker.kt:202).
+Out of that one mismatch: the picker
 **opens on the previous day** for every zone east of UTC (the day the user confirms is then stored a
 day early — Japan UTC+9, Israel UTC+3, India UTC+5:30), and the confirmed day is **decremented** for
 every zone west of UTC (UTC-11). The widget is shared by all the affected screens, which is why four
@@ -113,7 +115,7 @@ Two traps it avoids on purpose:
 * A pure `pickedDate(initialSelectedDateMillis(x)) == x` round trip **cannot** catch this bug: the
   broken legs are self-consistent (both misinterpreted the same way). The suite therefore asserts the
   **wire encoding** (`initialSelectedDateMillis` must equal the UTC midnight of the app-zone day,
-  [`MaterialDatePickerDateBridgeTest.kt:105`](shared/ui/core/src/test/java/com/ivy/ui/time/impl/MaterialDatePickerDateBridgeTest.kt:105)).
+  [`MaterialDatePickerDateBridgeTest.kt:110`](shared/ui/core/src/test/java/com/ivy/ui/time/impl/MaterialDatePickerDateBridgeTest.kt:110)).
 * **DST.** The first draft hard-coded "Jerusalem is UTC+3" on a 2024-03-10 instant; Israel was UTC+2
   until 2024-03-29, so the test's *expectation* was wrong even though the fix was right. The dates are
   now DST-safe and the offsets the suite relies on are asserted in
