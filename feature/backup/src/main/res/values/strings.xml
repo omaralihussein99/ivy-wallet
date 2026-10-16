@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="backups">Backups</string>
+    <string name="backup_now">Back up now</string>
+    <string name="refresh">Refresh</string>
+    <string name="delete">Delete</string>
+    <string name="restore">Restore</string>
+    <string name="cancel">Cancel</string>
+
+    <string name="no_backups">No backups yet. Tap "Back up now" to take the first one.</string>
+    <string name="interval_hint">A backup is taken automatically every %1$d hours while the app is installed.</string>
+    <string name="retention_hint">Only the newest %1$d backups are kept; older ones are deleted automatically.</string>
+    <string name="backup_row_subtitle">%1$s &#183; %2$s</string>
+
+    <string name="restore_backup_title">Restore this backup?</string>
+    <string name="restore_warning">Everything currently in Ivy is replaced by the contents of this backup and the app restarts immediately. Anything you created after the backup is lost. This cannot be undone.</string>
+    <string name="restore_confirm_instruction">Type the file name to enable Restore:\n%1$s</string>
+    <string name="type_file_name_hint">File name</string>
+
+    <string name="backup_created">Backup created.</string>
+    <string name="backup_failed">Could not create the backup.</string>
+    <string name="backup_deleted">Backup deleted.</string>
+    <string name="delete_refused">That backup is in use and was not deleted.</string>
+    <string name="restore_not_found">That backup is gone.</string>
+    <string name="restore_not_usable">That file is not a usable database.</string>
+    <string name="restore_failed">The restore failed. Nothing was changed.</string>
+    <string name="restore_restarting">Restored. The app is restarting.</string>
+</resources>

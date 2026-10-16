@@ -511,4 +511,7 @@
     <string name="account_hierarchy_close">Close</string>
     <string name="account_hierarchy_expand">Expand</string>
     <string name="account_hierarchy_collapse">Collapse</string>
+
+    <!-- Local automatic backups (on-device backup list, manual backup, restore) -->
+    <string name="backups_entry">Backups</string>
 </resources>

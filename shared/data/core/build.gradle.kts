@@ -15,6 +15,9 @@ dependencies {
     api(libs.datastore)
     implementation(libs.bundles.ktor)
 
+    // Phase 3: local automatic backups are driven by WorkManager (LocalBackupScheduler/LocalBackupWorker).
+    implementation(libs.androidx.work)
+
     testImplementation(projects.shared.data.modelTesting)
     androidTestImplementation(libs.bundles.integration.testing)
 }

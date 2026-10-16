@@ -568,6 +568,26 @@ private fun QuickAccess(
 
             Spacer(Modifier.weight(1f))
         }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Fourth Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.Top
+        ) {
+            Spacer(Modifier.weight(1f))
+
+            MoreMenuButton(
+                icon = R.drawable.home_more_menu_backups,
+                label = stringResource(R.string.backups_entry),
+            ) {
+                nav.navigateTo(com.ivy.navigation.BackupsScreen)
+            }
+
+            Spacer(Modifier.weight(1f))
+        }
     }
 }
 

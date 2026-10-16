@@ -163,3 +163,9 @@ data class ShoppingListScreen(
  * balances and the double-count-safe grand total. Material3 screen (not legacy).
  */
 data object AccountHierarchyScreen : Screen
+
+/**
+ * The local automatic backups: the list of on-device backups with their timestamp and size, the
+ * manual "Back up now" and the typed-confirmation restore. Material3 screen (not legacy).
+ */
+data object BackupsScreen : Screen
