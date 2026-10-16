@@ -27,6 +27,7 @@ import com.ivy.base.time.TimeProvider
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneOffset
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -38,6 +39,11 @@ class AndroidDateTimePicker @Inject constructor(
 ) : DateTimePicker {
     private var datePickerViewState by mutableStateOf<DatePickerViewState?>(null)
     private var timePickerViewState by mutableStateOf<TimePickerViewState?>(null)
+
+    private val dateBridge = MaterialDatePickerDateBridge(
+        timeConverter = timeConverter,
+        timeProvider = timeProvider,
+    )
 
     @Composable
     override fun Content() {
@@ -52,7 +58,7 @@ class AndroidDateTimePicker @Inject constructor(
         modifier: Modifier = Modifier
     ) {
         val pickerState = rememberDatePickerState(
-            initialSelectedDateMillis = viewState.initialDate?.toEpochMilli(),
+            initialSelectedDateMillis = dateBridge.initialSelectedDateMillis(viewState.initialDate),
         )
         DatePickerDialog(
             modifier = modifier,
@@ -60,10 +66,8 @@ class AndroidDateTimePicker @Inject constructor(
             confirmButton = {
                 ConfirmButton(onClick = {
                     datePickerViewState = null
-                    pickerState.selectedDateMillis?.let(Instant::ofEpochMilli)
-                        ?.let {
-                            with(timeConverter) { it.toLocalDate() }
-                    }?.let(viewState.onDatePicked)
+                    dateBridge.pickedDate(pickerState.selectedDateMillis)
+                        ?.let(viewState.onDatePicked)
                 })
             },
             colors = DatePickerDefaults.colors(
@@ -162,4 +166,41 @@ class AndroidDateTimePicker @Inject constructor(
         val initialTime: LocalTime?,
         val onTimePicked: (LocalTime) -> Unit
     )
+}
+
+/**
+ * The bridge between Ivy's date plumbing and Material3's date picker.
+ *
+ * `androidx.compose.material3.DatePickerState` encodes a **calendar day** as UTC midnight millis
+ * (`initialSelectedDateMillis` and `selectedDateMillis` are documented as "UTC milliseconds from
+ * the epoch"), while Ivy stores real [Instant]s and resolves their calendar day with the app's
+ * zone via [TimeConverter]. These two helpers are the only place where the two conventions meet,
+ * which is why they live here instead of in each screen.
+ */
+internal class MaterialDatePickerDateBridge(
+    private val timeConverter: TimeConverter,
+    private val timeProvider: TimeProvider,
+) {
+
+    /**
+     * The day to pre-select: the calendar day of [dateTime] *in the app's zone* (or the local today
+     * when there is no date yet), encoded the way Material3 expects it - as the UTC midnight of that
+     * day. Handing Material3 the raw epoch millis of the instant instead makes the picker pre-select
+     * the instant's *UTC* day, which is the previous day for every zone east of UTC.
+     */
+    fun initialSelectedDateMillis(dateTime: Instant?): Long {
+        val day = dateTime?.let { with(timeConverter) { it.toLocalDate() } }
+            ?: timeProvider.localDateNow()
+        return day.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    }
+
+    /**
+     * The day the user tapped. Material3 reports it as the UTC midnight of the selected day, so it
+     * must be decoded in UTC too - decoding it with the app's zone returns the previous day for
+     * every zone west of UTC.
+     */
+    fun pickedDate(selectedDateMillis: Long?): LocalDate? = selectedDateMillis
+        ?.let(Instant::ofEpochMilli)
+        ?.atZone(ZoneOffset.UTC)
+        ?.toLocalDate()
 }
