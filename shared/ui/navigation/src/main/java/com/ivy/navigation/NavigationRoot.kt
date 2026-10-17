@@ -6,10 +6,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
+import androidx.lifecycle.HasDefaultViewModelProviderFactory
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 
 @SuppressLint("ComposeCompositionLocalUsage")
@@ -25,7 +27,10 @@ private val LocalNavigation = compositionLocalOf<Navigation> { error("No LocalNa
  * ViewModel, so the new screen used to be killed in the middle of its first load and rendered
  * empty until it was opened a second time.
  */
-private class ScreenViewModelStoreOwner : ViewModelStoreOwner {
+private class ScreenViewModelStoreOwner(
+    override val defaultViewModelProviderFactory: ViewModelProvider.Factory,
+    override val defaultViewModelCreationExtras: CreationExtras,
+) : ViewModelStoreOwner, HasDefaultViewModelProviderFactory {
     override val viewModelStore: ViewModelStore = ViewModelStore()
 }
 
@@ -42,7 +47,19 @@ fun NavigationRoot(
             // Legacy screens keep using the host's store, exactly as before.
             navGraph(screen)
         } else {
-            val screenStore = remember(screen) { ScreenViewModelStoreOwner() }
+            // Screen-scoped ViewModels are @HiltViewModel classes with @Inject constructors. A bare
+            // store owner has no factory, so ViewModelProvider fell back to the no-arg constructor
+            // and crashed ("Cannot create an instance of class ...ViewModel"). The host's factory
+            // (Hilt's) and creation extras are borrowed; only the store itself is screen-bound.
+            val hostFactory = LocalViewModelStoreOwner.current as? HasDefaultViewModelProviderFactory
+            val screenStore = remember(screen, hostFactory) {
+                ScreenViewModelStoreOwner(
+                    defaultViewModelProviderFactory = hostFactory?.defaultViewModelProviderFactory
+                        ?: ViewModelProvider.NewInstanceFactory(),
+                    defaultViewModelCreationExtras = hostFactory?.defaultViewModelCreationExtras
+                        ?: CreationExtras.Empty,
+                )
+            }
             CompositionLocalProvider(LocalViewModelStoreOwner provides screenStore) {
                 navGraph(screen)
             }
