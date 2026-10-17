@@ -28,8 +28,8 @@ Three of the four candidates were ruled out by reading the code and the *merged*
 | candidate | verdict |
 | --- | --- |
 | worker annotation/constructor | correct: `@HiltWorker` + `@AssistedInject constructor(@Assisted appContext, @Assisted params, repository)` in [`LocalBackupWorker.kt`](shared/data/core/src/main/java/com/ivy/data/backup/local/LocalBackupWorker.kt:18) |
-| `Application` not a `Configuration.Provider` | correct: [`IvyAndroidApp.kt`](app/src/main/java/com/ivy/wallet/IvyAndroidApp.kt:21) implements it and injects `HiltWorkerFactory` |
-| default `androidx.startup` initializer still installed | absent: the merged demo manifest contains no `androidx.startup.InitializationProvider`, only WorkManager's own services, so the `tools:node="remove"` in [`AndroidManifest.xml`](app/src/main/AndroidManifest.xml:57) held |
+| `Application` not a `Configuration.Provider` | correct: [`IvyAndroidApp.kt`](app/src/main/java/com/ivy/wallet/IvyAndroidApp.kt:17) implements it and injects `HiltWorkerFactory` |
+| default `androidx.startup` initializer still installed | absent: the merged demo manifest contains no `androidx.startup.InitializationProvider`, only WorkManager's own services, so the `tools:node="remove"` in [`AndroidManifest.xml`](app/src/main/AndroidManifest.xml:56) held |
 | `androidx.hilt:hilt-compiler` missing | **this is it** |
 
 The real cause, in one sentence: the shared Hilt convention plugin put only Dagger's processor
@@ -55,7 +55,7 @@ Two build files and one test - nothing in the backup feature itself:
 1. [`gradle/libs.versions.toml`](gradle/libs.versions.toml:12): added the version `androidx-hilt = "1.2.0"`, added
    `androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "androidx-hilt" }`, and pointed
    `hilt-work` at the same version so the runtime and the processor cannot drift apart.
-2. [`buildSrc/src/main/kotlin/ivy.hilt.gradle.kts:25`](buildSrc/src/main/kotlin/ivy.hilt.gradle.kts): added
+2. [`buildSrc/src/main/kotlin/ivy.hilt.gradle.kts:23`](buildSrc/src/main/kotlin/ivy.hilt.gradle.kts): added
    `ksp(catalog.library("androidx-hilt-compiler"))` next to Dagger's processor, i.e. in *the* place every module
    gets its Hilt processing from, so any future `@HiltWorker` is wired by construction.
 3. [`LocalBackupWorkerWiringTest.kt`](shared/data/core/src/test/java/com/ivy/data/backup/local/LocalBackupWorkerWiringTest.kt:1):
