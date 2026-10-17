@@ -266,4 +266,137 @@ class ShoppingCheckoutSheetRulesTest {
             defaultCheckoutAccountId(listAccountId = null, accountIds = listOf(accountA, accountB)),
         )
     }
+
+    // ------------------------------------------------------------ one transaction for the trip
+
+    @Test
+    fun `one transaction mode posts the whole trip as a single row`() {
+        val milk = item(name = "Milk", quantity = 2.0, unitPrice = 4.0)
+        val bread = item(name = "Bread", unitPrice = 3.0)
+        val eggs = item(name = "Eggs", unitPrice = 2.5)
+        val drafts = checkoutDrafts(listOf(milk, bread, eggs), defaultAccountId = accountA)
+        val prices = drafts.associate { it.itemId to priceInputText(it.unitPrice) }
+
+        // The per-item shape would write three rows...
+        assertEquals(3, buildDraftLines(drafts, prices, tripName = "Weekly groceries").size)
+
+        // ...while this shape writes exactly one.
+        val line = buildSingleTransactionLine(
+            drafts = drafts,
+            priceText = prices,
+            tripName = "Weekly groceries",
+            accountId = accountA,
+            categoryId = categoryId,
+        )!!
+
+        assertEquals("Weekly groceries", line.title)
+        assertEquals(accountA, line.accountId)
+        assertEquals(categoryId, line.categoryId)
+    }
+
+    @Test
+    fun `the single transaction is the sum of the priced items`() {
+        val milk = item(name = "Milk", quantity = 2.0, unitPrice = 4.0)
+        val bread = item(name = "Bread", unitPrice = 3.5)
+        val drafts = checkoutDrafts(listOf(milk, bread), defaultAccountId = accountA)
+
+        val line = buildSingleTransactionLine(
+            drafts = drafts,
+            priceText = mapOf(milk.id to "5", bread.id to "3.5"),
+            tripName = "Weekly groceries",
+            accountId = accountA,
+            categoryId = null,
+        )!!
+
+        // 5 * 2 + 3.5
+        assertEquals(13.5, line.amount, 0.0001)
+    }
+
+    @Test
+    fun `an unpriced item is left out of the single transaction total`() {
+        val milk = item(name = "Milk", unitPrice = 4.0)
+        val unpriced = item(name = "Mystery item", unitPrice = null)
+        val drafts = checkoutDrafts(listOf(milk, unpriced), defaultAccountId = accountA)
+
+        val line = buildSingleTransactionLine(
+            drafts = drafts,
+            priceText = mapOf(milk.id to "4", unpriced.id to ""),
+            tripName = "Weekly groceries",
+            accountId = accountA,
+            categoryId = null,
+        )!!
+
+        assertEquals(4.0, line.amount, 0.0001)
+    }
+
+    @Test
+    fun `one transaction mode refuses to post when nothing is priced`() {
+        val milk = item(name = "Milk", unitPrice = null)
+        val drafts = checkoutDrafts(listOf(milk), defaultAccountId = accountA)
+
+        assertNull(
+            buildSingleTransactionLine(
+                drafts = drafts,
+                priceText = mapOf(milk.id to ""),
+                tripName = "Weekly groceries",
+                accountId = accountA,
+                categoryId = null,
+            )
+        )
+    }
+
+    @Test
+    fun `one transaction mode refuses to post without a paying account`() {
+        val milk = item(name = "Milk", unitPrice = 4.0)
+        val drafts = checkoutDrafts(listOf(milk), defaultAccountId = null)
+
+        assertNull(
+            buildSingleTransactionLine(
+                drafts = drafts,
+                priceText = mapOf(milk.id to "4"),
+                tripName = "Weekly groceries",
+                accountId = null,
+                categoryId = null,
+            )
+        )
+    }
+
+    @Test
+    fun `a trip that is already in the ledger cannot post a second transaction`() {
+        // Everything the trip posted carries the transaction id it produced.
+        val posted = UUID.randomUUID()
+        val items = listOf(
+            item(name = "Milk", quantity = 2.0, unitPrice = 4.0, convertedTransactionId = posted),
+            item(name = "Bread", unitPrice = 3.0, convertedTransactionId = posted),
+        )
+
+        // Nothing is postable any more, so the sheet is empty and so is the single row.
+        assertTrue(items.postableItems().isEmpty())
+        assertTrue(items.unpostedItems().isEmpty())
+        val drafts = checkoutDrafts(items, defaultAccountId = accountA)
+        assertNull(
+            buildSingleTransactionLine(
+                drafts = drafts,
+                priceText = emptyMap(),
+                tripName = "Weekly groceries",
+                accountId = accountA,
+                categoryId = null,
+            )
+        )
+    }
+
+    @Test
+    fun `the single row is pre-filled with the category most items carry`() {
+        val milk = item(name = "Milk", categoryId = categoryId)
+        val bread = item(name = "Bread", categoryId = categoryId)
+        val other = item(name = "Cat food", categoryId = UUID.randomUUID())
+        val items = listOf(milk, bread, other)
+
+        assertEquals(categoryId, mostCommonCategoryId(items))
+    }
+
+    @Test
+    fun `a trip with no item categories pre-fills no category`() {
+        assertNull(mostCommonCategoryId(listOf(item(name = "Milk"), item(name = "Bread"))))
+    }
 }

@@ -90,7 +90,7 @@ fun BoxWithConstraintsScope.IvyNavGraph(screen: Screen?) {
         is LoanDetailsScreen -> LoanDetailsScreen(screen = screen)
         is SearchScreen -> SearchScreen(screen = screen)
         is CSVScreen -> CSVScreen(screen = screen)
-        is ShoppingListScreen -> ShoppingListScreenImpl()
+        is ShoppingListScreen -> ShoppingListScreenImpl(listId = screen.listId)
         AccountHierarchyScreen -> AccountHierarchyScreenImpl()
         BackupsScreen -> BackupsScreenImpl()
         FeaturesScreen -> FeaturesScreenImpl()

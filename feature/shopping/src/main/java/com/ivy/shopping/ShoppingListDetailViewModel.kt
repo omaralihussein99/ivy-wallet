@@ -13,7 +13,6 @@ import com.ivy.data.db.entity.ShoppingItemEntity
 import com.ivy.data.repository.AccountRepository
 import com.ivy.data.repository.CategoryRepository
 import com.ivy.navigation.Navigation
-import com.ivy.navigation.ShoppingListScreen
 import com.ivy.ui.ComposeViewModel
 import com.ivy.ui.FormatMoneyUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -39,15 +38,19 @@ class ShoppingListDetailViewModel @Inject constructor(
 ) : ComposeViewModel<ShoppingListDetailViewState, ShoppingListDetailEvent>() {
 
     /**
-     * The screen carries the id, so it is read once while the current screen is still this one.
+     * The list currently shown. It comes from the screen's argument on every [load], never from the
+     * screen that happened to be current when the view model was constructed: the old code read the
+     * id once while the screen was still settling, so the screen could stay empty forever.
      */
-    private val listId: UUID? = (navigation.currentScreen as? ShoppingListScreen)?.listId
+    private var listId: UUID? = null
+    private var loadedListId: UUID? = null
 
     private var listName by mutableStateOf("")
     private var exists by mutableStateOf(true)
     private var isTemplate by mutableStateOf(false)
     private var items by mutableStateOf<List<ShoppingItemEntity>>(emptyList())
     private var newItemName by mutableStateOf("")
+    private var itemEditor by mutableStateOf<ShoppingItemEditorViewState?>(null)
 
     // Formatted by the view model because FormatMoneyUseCase is a suspend function.
     private var estimatedRemainingText by mutableStateOf("")
@@ -63,16 +66,35 @@ class ShoppingListDetailViewModel @Inject constructor(
     private var checkoutTotalText by mutableStateOf("")
     private var checkoutOpen by mutableStateOf(false)
     private var picker by mutableStateOf<ShoppingPickerViewState?>(null)
+    private var mode by mutableStateOf(ShoppingCheckoutMode.SingleTransaction)
+    private var tripAccountId by mutableStateOf<UUID?>(null)
+    private var tripCategoryId by mutableStateOf<UUID?>(null)
+    private var refusedEmptyTotal by mutableStateOf(false)
+    private var posting by mutableStateOf(false)
 
-    init {
-        viewModelScope.launch { reload() }
+    /**
+     * Loads the list the screen was opened with.
+     *
+     * It is a suspending call made from the screen's `LaunchedEffect`, not something fired from this
+     * view model's own scope in `init`: the load then belongs to the screen's lifetime and finishes
+     * even if the view model was created in the middle of a navigation.
+     */
+    suspend fun load(requestedListId: UUID) {
+        if (!shouldLoadList(loadedListId = loadedListId, requestedListId = requestedListId)) return
+        listId = requestedListId
+        loadedListId = requestedListId
+        reload()
     }
 
     @Composable
     override fun uiState(): ShoppingListDetailViewState {
         val checked = items.count { it.isChecked }
         val total = items.size
-        val resolved = resolvedCheckoutRows(drafts, draftPrices)
+        val resolved = resolvedCheckoutRows(
+            drafts = drafts,
+            priceText = draftPrices,
+            fallbackAccountId = tripAccountId,
+        )
         return ShoppingListDetailViewState(
             listName = listName,
             exists = exists,
@@ -116,11 +138,27 @@ class ShoppingListDetailViewModel @Inject constructor(
                         )
                     },
                     totalText = checkoutTotalText,
-                    canConfirm = resolved.isNotEmpty(),
+                    canConfirm = when (mode) {
+                        // One row has to be paid from one account, so the trip needs one.
+                        ShoppingCheckoutMode.SingleTransaction ->
+                            resolved.isNotEmpty() && tripAccountId != null
+
+                        ShoppingCheckoutMode.RowPerItem -> resolved.isNotEmpty()
+                    },
                     postableCount = resolved.size,
                     picker = picker,
+                    mode = mode,
+                    tripAccountLabel = tripAccountId?.let { id ->
+                        accounts.firstOrNull { it.id == id }?.label
+                    },
+                    tripCategoryLabel = tripCategoryId?.let { id ->
+                        categories.firstOrNull { it.id == id }?.label
+                    },
+                    refusedEmptyTotal = refusedEmptyTotal,
+                    posting = posting,
                 )
             },
+            itemEditor = itemEditor,
         )
     }
 
@@ -132,8 +170,20 @@ class ShoppingListDetailViewModel @Inject constructor(
             ShoppingListDetailEvent.OnAddItem -> addItem()
             is ShoppingListDetailEvent.OnToggleItem -> toggleItem(event.itemId)
             is ShoppingListDetailEvent.OnDeleteItem -> deleteItem(event.itemId)
+            is ShoppingListDetailEvent.OnEditItem -> openItemEditor(event.itemId)
+            is ShoppingListDetailEvent.OnEditorPriceChange -> updateEditor {
+                it.copy(priceText = event.price)
+            }
+
+            is ShoppingListDetailEvent.OnEditorQuantityChange -> updateEditor {
+                it.copy(quantityText = event.quantity)
+            }
+
+            ShoppingListDetailEvent.OnEditorSave -> saveItemEditor()
+            ShoppingListDetailEvent.OnEditorDismiss -> itemEditor = null
             ShoppingListDetailEvent.OnCheckoutClick -> openCheckout()
             ShoppingListDetailEvent.OnCheckoutDismiss -> closeCheckout()
+            is ShoppingListDetailEvent.OnCheckoutModeChange -> setCheckoutMode(event.mode)
             is ShoppingListDetailEvent.OnCheckoutPriceChange ->
                 setDraftPrice(event.itemId, event.price)
 
@@ -193,11 +243,62 @@ class ShoppingListDetailViewModel @Inject constructor(
         }
     }
 
+    // ------------------------------------------------------------------ editing an item
+
+    /**
+     * Setting an item's price (and quantity) is an explicit action from the item's row, and it works
+     * the same in a template and in a trip. It is deliberately *not* something that happens when an
+     * item is ticked: ticking stays silent.
+     */
+    private fun openItemEditor(itemId: UUID) {
+        val item = items.firstOrNull { it.id == itemId } ?: return
+        itemEditor = editorState(
+            ShoppingItemEditorViewState(
+                itemId = item.id,
+                title = item.name,
+                priceText = priceInputText(item.unitPrice),
+                quantityText = formatQuantity(item.quantity),
+                canSave = true,
+            )
+        )
+    }
+
+    private fun updateEditor(change: (ShoppingItemEditorViewState) -> ShoppingItemEditorViewState) {
+        itemEditor = itemEditor?.let { editorState(change(it)) }
+    }
+
+    /** Save is available only while both boxes hold something usable. */
+    private fun editorState(editor: ShoppingItemEditorViewState): ShoppingItemEditorViewState =
+        editor.copy(
+            canSave = parsePriceEdit(editor.priceText) != PriceEdit.Invalid &&
+                parseQuantityInput(editor.quantityText) != null
+        )
+
+    private fun saveItemEditor() {
+        val editor = itemEditor ?: return
+        // A quantity of zero or a negative amount is refused rather than stored.
+        val quantity = parseQuantityInput(editor.quantityText) ?: return
+        val price = when (val parsed = parsePriceEdit(editor.priceText)) {
+            // An empty box is an explicit "this item has no price yet".
+            PriceEdit.Cleared -> null
+            is PriceEdit.Priced -> parsed.value
+            PriceEdit.Invalid -> return
+        }
+        val item = items.firstOrNull { it.id == editor.itemId } ?: return
+        viewModelScope.launch {
+            writeShoppingItemDao.save(item.copy(quantity = quantity, unitPrice = price))
+            itemEditor = null
+            reload()
+        }
+    }
+
     // ------------------------------------------------------------------ checkout sheet
 
     /**
      * Opens the sheet for every ticked item that has not been posted yet. Each box starts from what is
      * already known, so the user only touches the prices that are actually different at the till.
+     *
+     * One transaction for the whole trip is the default; the per-item shape is one tap away.
      */
     private fun openCheckout() {
         if (items.postableItems().isEmpty()) return
@@ -212,6 +313,11 @@ class ShoppingListDetailViewModel @Inject constructor(
             draftPrices = newDrafts.associate { it.itemId to priceInputText(it.unitPrice) }
             draftLineTotalTexts = emptyMap()
             checkoutTotalText = ""
+            tripAccountId = defaultAccountId
+            tripCategoryId = mostCommonCategoryId(items.postableItems())
+            mode = ShoppingCheckoutMode.SingleTransaction
+            refusedEmptyTotal = false
+            posting = false
             picker = null
             checkoutOpen = true
             refreshCheckoutTexts()
@@ -225,14 +331,21 @@ class ShoppingListDetailViewModel @Inject constructor(
         draftPrices = emptyMap()
         draftLineTotalTexts = emptyMap()
         checkoutTotalText = ""
+        refusedEmptyTotal = false
+    }
+
+    private fun setCheckoutMode(mode: ShoppingCheckoutMode) {
+        this.mode = mode
+        refusedEmptyTotal = false
     }
 
     private fun setDraftPrice(itemId: UUID, price: String) {
         draftPrices = draftPrices + (itemId to price)
+        refusedEmptyTotal = false
         refreshCheckoutTexts()
     }
 
-    private fun openPicker(itemId: UUID, kind: ShoppingPickKind) {
+    private fun openPicker(itemId: UUID?, kind: ShoppingPickKind) {
         viewModelScope.launch {
             loadPickers()
             val options = when (kind) {
@@ -244,15 +357,23 @@ class ShoppingListDetailViewModel @Inject constructor(
         }
     }
 
-    private fun applyPick(itemId: UUID, optionId: UUID?) {
+    private fun applyPick(itemId: UUID?, optionId: UUID?) {
         val current = picker ?: return
-        drafts = drafts.map { draft ->
-            if (draft.itemId != itemId) {
-                draft
-            } else {
-                when (current.kind) {
-                    ShoppingPickKind.Account -> draft.copy(accountId = optionId)
-                    ShoppingPickKind.Category -> draft.copy(categoryId = optionId)
+        if (itemId == null) {
+            // The whole-trip account/category, used by single-transaction mode.
+            when (current.kind) {
+                ShoppingPickKind.Account -> tripAccountId = optionId
+                ShoppingPickKind.Category -> tripCategoryId = optionId
+            }
+        } else {
+            drafts = drafts.map { draft ->
+                if (draft.itemId != itemId) {
+                    draft
+                } else {
+                    when (current.kind) {
+                        ShoppingPickKind.Account -> draft.copy(accountId = optionId)
+                        ShoppingPickKind.Category -> draft.copy(categoryId = optionId)
+                    }
                 }
             }
         }
@@ -260,24 +381,54 @@ class ShoppingListDetailViewModel @Inject constructor(
         refreshCheckoutTexts()
     }
 
+    /**
+     * Posts the trip in the shape the user picked.
+     *
+     * `posting` is set before the coroutine starts and is only cleared when the post finishes, so a
+     * second tap cannot post the trip twice. The service re-reads the items as a second guard.
+     */
     private fun confirmCheckout() {
         val id = listId ?: return
-        if (buildDraftLines(drafts, draftPrices, tripName = listName).isEmpty()) return
+        if (posting) return
+        posting = true
+        refusedEmptyTotal = false
+        val modeToPost = mode
         viewModelScope.launch {
-            val posted = checkoutService.postTripDrafts(
-                items = items,
-                drafts = drafts,
-                priceText = draftPrices,
-                tripName = listName,
-            )
-            if (posted <= 0) return@launch
-            val list = shoppingListDao.findById(id)
-            if (list != null) {
-                // The trip is done, so it is archived and leaves the list of active trips.
-                writeShoppingListDao.save(list.copy(isArchived = true))
+            try {
+                val posted = when (modeToPost) {
+                    ShoppingCheckoutMode.SingleTransaction -> checkoutService.postTripAsOneTransaction(
+                        drafts = drafts,
+                        priceText = draftPrices,
+                        tripName = listName,
+                        accountId = tripAccountId,
+                        categoryId = tripCategoryId,
+                    )
+
+                    ShoppingCheckoutMode.RowPerItem -> checkoutService.postTripDrafts(
+                        items = items,
+                        drafts = drafts,
+                        priceText = draftPrices,
+                        tripName = listName,
+                    )
+                }
+                if (posted <= 0) {
+                    // Nothing was priced (or there is nobody to pay from): refuse instead of
+                    // writing a 0.00 transaction.
+                    refusedEmptyTotal = true
+                    return@launch
+                }
+                // Only a trip that is completely in the ledger leaves the list of active trips.
+                // Unpriced items keep it open, so nothing the owner bought silently disappears.
+                val freshItems = shoppingItemDao.findByListId(id)
+                val list = shoppingListDao.findById(id)
+                if (list != null && shouldArchiveTrip(freshItems)) {
+                    writeShoppingListDao.save(list.copy(isArchived = true))
+                }
+                closeCheckout()
+                navigation.back()
+            } finally {
+                posting = false
             }
-            closeCheckout()
-            navigation.back()
         }
     }
 
@@ -303,7 +454,11 @@ class ShoppingListDetailViewModel @Inject constructor(
     }
 
     private suspend fun refreshCheckoutTextsNow() {
-        val resolved = resolvedCheckoutRows(drafts, draftPrices)
+        val resolved = resolvedCheckoutRows(
+            drafts = drafts,
+            priceText = draftPrices,
+            fallbackAccountId = tripAccountId,
+        )
         checkoutTotalText = formatMoney.format(resolved.sumOf { it.amount }, shortenAmount = false)
         draftLineTotalTexts = resolved.associate {
             it.draft.itemId to formatMoney.format(it.amount, shortenAmount = false)

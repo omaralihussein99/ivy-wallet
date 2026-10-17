@@ -361,6 +361,8 @@
     <string name="groceries">Groceries</string>
     <string name="entertainment">Entertainment</string>
     <string name="shopping">Shopping</string>
+    <string name="shopping_items_breakdown">Shopping items</string>
+    <string name="shopping_items_total">Total</string>
     <string name="gifts">Gifts</string>
     <string name="health">Health</string>
     <string name="investments">Investments</string>

@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -35,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -45,10 +47,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ivy.navigation.screenScopedViewModel
 import com.ivy.ui.component.BackButton
+import java.util.UUID
 
 @Composable
-fun ShoppingListScreenImpl() {
+fun ShoppingListScreenImpl(listId: UUID) {
     val viewModel: ShoppingListDetailViewModel = screenScopedViewModel()
+    // The id is the screen's argument, so the list is loaded for it - and loaded again if the same
+    // screen is ever shown for another id. Loading used to be captured once, while the screen was
+    // still settling, which left the screen empty.
+    LaunchedEffect(listId) {
+        viewModel.load(listId)
+    }
     val viewState = viewModel.uiState()
     ShoppingListScreenUi(
         viewState = viewState,
@@ -112,6 +121,10 @@ fun ShoppingListScreenUi(
     viewState.checkout?.let { checkout ->
         CheckoutSheet(sheet = checkout, onEvent = onEvent)
     }
+
+    viewState.itemEditor?.let { editor ->
+        ItemEditorDialog(editor = editor, onEvent = onEvent)
+    }
 }
 
 @Composable
@@ -146,6 +159,7 @@ private fun Content(
                         // A template is never ticked, so it shows no checkbox at all.
                         showCheckbox = !viewState.isTemplate,
                         onToggle = { onEvent(ShoppingListDetailEvent.OnToggleItem(row.id)) },
+                        onEdit = { onEvent(ShoppingListDetailEvent.OnEditItem(row.id)) },
                         onDelete = { onEvent(ShoppingListDetailEvent.OnDeleteItem(row.id)) },
                     )
                 }
@@ -238,6 +252,7 @@ private fun ItemRow(
     row: ShoppingItemRowViewState,
     showCheckbox: Boolean,
     onToggle: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Row(
@@ -278,6 +293,13 @@ private fun ItemRow(
             }
         }
 
+        IconButton(onClick = onEdit) {
+            Icon(
+                imageVector = Icons.Filled.Edit,
+                contentDescription = stringResource(R.string.edit_item),
+            )
+        }
+
         IconButton(onClick = onDelete) {
             Icon(
                 imageVector = Icons.Filled.Delete,
@@ -289,8 +311,77 @@ private fun ItemRow(
 }
 
 /**
- * One review of everything that is ticked: a box per item with its price, its account and its
- * category, all pre-filled, and a running total that follows whatever is typed.
+ * The explicit editor for one item's price and quantity.
+ *
+ * It is reached from the item's own row and works the same in templates and trips. It is never
+ * opened by ticking an item: ticking stays silent.
+ */
+@Composable
+private fun ItemEditorDialog(
+    editor: ShoppingItemEditorViewState,
+    onEvent: (ShoppingListDetailEvent) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { onEvent(ShoppingListDetailEvent.OnEditorDismiss) },
+        title = { Text(text = editor.title) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = editor.priceText,
+                    onValueChange = {
+                        onEvent(ShoppingListDetailEvent.OnEditorPriceChange(it))
+                    },
+                    singleLine = true,
+                    label = { Text(text = stringResource(R.string.item_price)) },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Decimal,
+                        imeAction = ImeAction.Next,
+                    ),
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = editor.quantityText,
+                    onValueChange = {
+                        onEvent(ShoppingListDetailEvent.OnEditorQuantityChange(it))
+                    },
+                    singleLine = true,
+                    label = { Text(text = stringResource(R.string.item_quantity)) },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Decimal,
+                        imeAction = ImeAction.Done,
+                    ),
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = stringResource(R.string.item_editor_no_price_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onEvent(ShoppingListDetailEvent.OnEditorSave) },
+                enabled = editor.canSave,
+            ) {
+                Text(text = stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onEvent(ShoppingListDetailEvent.OnEditorDismiss) }) {
+                Text(text = stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+/**
+ * One review of everything that is ticked: a box per item with its price, and a choice of how the
+ * trip reaches the ledger - one transaction for the whole trip (default) or one row per item.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -310,24 +401,44 @@ private fun CheckoutSheet(
                 style = MaterialTheme.typography.titleLarge,
             )
 
+            CheckoutModeSelector(sheet = sheet, onEvent = onEvent)
+
             Text(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                text = stringResource(
-                    R.string.checkout_summary,
-                    sheet.postableCount,
-                    sheet.rows.size,
-                ),
+                text = if (sheet.mode == ShoppingCheckoutMode.SingleTransaction) {
+                    stringResource(R.string.checkout_summary_single, sheet.postableCount)
+                } else {
+                    stringResource(R.string.checkout_summary, sheet.postableCount, sheet.rows.size)
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            if (sheet.mode == ShoppingCheckoutMode.SingleTransaction) {
+                SingleTransactionTarget(sheet = sheet, onEvent = onEvent)
+            }
 
             HorizontalDivider()
 
             LazyColumn(modifier = Modifier.weight(1f)) {
                 items(items = sheet.rows, key = { it.itemId }) { row ->
-                    CheckoutRow(row = row, onEvent = onEvent)
+                    CheckoutRow(
+                        row = row,
+                        // The per-row account only matters when every item is its own row.
+                        showRowTargets = sheet.mode == ShoppingCheckoutMode.RowPerItem,
+                        onEvent = onEvent,
+                    )
                     HorizontalDivider()
                 }
+            }
+
+            if (sheet.refusedEmptyTotal) {
+                Text(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    text = stringResource(R.string.checkout_nothing_priced),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
 
             Row(
@@ -356,7 +467,7 @@ private fun CheckoutSheet(
 
                 Button(
                     onClick = { onEvent(ShoppingListDetailEvent.OnCheckoutConfirm) },
-                    enabled = sheet.canConfirm,
+                    enabled = sheet.canConfirm && !sheet.posting,
                 ) {
                     Text(text = stringResource(R.string.post_to_ledger))
                 }
@@ -370,8 +481,102 @@ private fun CheckoutSheet(
 }
 
 @Composable
+private fun CheckoutModeSelector(
+    sheet: ShoppingCheckoutViewState,
+    onEvent: (ShoppingListDetailEvent) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(
+            text = stringResource(R.string.checkout_mode_hint),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onEvent(
+                        ShoppingListDetailEvent.OnCheckoutModeChange(
+                            ShoppingCheckoutMode.SingleTransaction
+                        )
+                    )
+                },
+                enabled = sheet.mode != ShoppingCheckoutMode.SingleTransaction,
+            ) {
+                Text(text = stringResource(R.string.checkout_mode_single), maxLines = 2)
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onEvent(
+                        ShoppingListDetailEvent.OnCheckoutModeChange(
+                            ShoppingCheckoutMode.RowPerItem
+                        )
+                    )
+                },
+                enabled = sheet.mode != ShoppingCheckoutMode.RowPerItem,
+            ) {
+                Text(text = stringResource(R.string.checkout_mode_rows), maxLines = 2)
+            }
+        }
+    }
+}
+
+/** One account and one category for the whole trip - the price of posting a single row. */
+@Composable
+private fun SingleTransactionTarget(
+    sheet: ShoppingCheckoutViewState,
+    onEvent: (ShoppingListDetailEvent) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(
+            text = stringResource(R.string.checkout_single_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = { onEvent(ShoppingListDetailEvent.OnCheckoutAccountClick(null)) },
+            ) {
+                Text(
+                    text = sheet.tripAccountLabel
+                        ?: stringResource(R.string.checkout_choose_account),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = { onEvent(ShoppingListDetailEvent.OnCheckoutCategoryClick(null)) },
+            ) {
+                Text(
+                    text = sheet.tripCategoryLabel
+                        ?: stringResource(R.string.checkout_no_category),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun CheckoutRow(
     row: ShoppingCheckoutRowViewState,
+    showRowTargets: Boolean,
     onEvent: (ShoppingListDetailEvent) -> Unit,
 ) {
     Column(
@@ -427,35 +632,37 @@ private fun CheckoutRow(
             )
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        if (showRowTargets) {
+            Spacer(modifier = Modifier.height(6.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(
-                modifier = Modifier.weight(1f),
-                onClick = { onEvent(ShoppingListDetailEvent.OnCheckoutAccountClick(row.itemId)) },
-            ) {
-                Text(
-                    text = if (row.hasAccount) {
-                        row.accountLabel
-                    } else {
-                        stringResource(R.string.checkout_choose_account)
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = { onEvent(ShoppingListDetailEvent.OnCheckoutAccountClick(row.itemId)) },
+                ) {
+                    Text(
+                        text = if (row.hasAccount) {
+                            row.accountLabel
+                        } else {
+                            stringResource(R.string.checkout_choose_account)
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
 
-            Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-            OutlinedButton(
-                modifier = Modifier.weight(1f),
-                onClick = { onEvent(ShoppingListDetailEvent.OnCheckoutCategoryClick(row.itemId)) },
-            ) {
-                Text(
-                    text = row.categoryLabel ?: stringResource(R.string.checkout_no_category),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = { onEvent(ShoppingListDetailEvent.OnCheckoutCategoryClick(row.itemId)) },
+                ) {
+                    Text(
+                        text = row.categoryLabel ?: stringResource(R.string.checkout_no_category),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

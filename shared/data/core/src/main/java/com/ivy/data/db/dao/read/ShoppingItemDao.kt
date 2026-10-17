@@ -18,4 +18,18 @@ interface ShoppingItemDao {
 
     @Query("SELECT COUNT(*) FROM shopping_items WHERE listId = :listId AND isDeleted = 0")
     suspend fun totalCount(listId: UUID): Int
+
+    /**
+     * The items that a ledger transaction was made of.
+     *
+     * A shopping trip posts either one row per item (each item points at its own transaction) or a
+     * single row for the whole trip (every item of the trip points at that same transaction). In
+     * both cases this is the only lookup needed to show the breakdown of a transaction, which is
+     * why posting a trip as one transaction needs no new column.
+     */
+    @Query(
+        "SELECT * FROM shopping_items WHERE convertedTransactionId = :transactionId " +
+            "AND isDeleted = 0 ORDER BY orderNum ASC"
+    )
+    suspend fun findByConvertedTransactionId(transactionId: UUID): List<ShoppingItemEntity>
 }

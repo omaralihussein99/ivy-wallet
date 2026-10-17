@@ -3,6 +3,7 @@ package com.ivy.shopping
 import com.ivy.data.db.entity.ShoppingItemEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.UUID
@@ -196,5 +197,105 @@ class ShoppingListRulesTest {
     @Test
     fun `a zero quantity does not divide by zero`() {
         assertEquals(5.0, unitPriceFromLine(amount = 5.0, quantity = 0.0), 0.0001)
+    }
+
+    // ------------------------------------------------------------ which list the screen loads
+
+    @Test
+    fun `the detail screen loads the list it was opened with`() {
+        val opened = UUID.randomUUID()
+
+        assertTrue(shouldLoadList(loadedListId = null, requestedListId = opened))
+    }
+
+    @Test
+    fun `the detail screen loads again when it is shown for another list`() {
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+
+        assertTrue(shouldLoadList(loadedListId = first, requestedListId = second))
+    }
+
+    @Test
+    fun `the detail screen does not reload the list it already shows`() {
+        val listId = UUID.randomUUID()
+
+        assertFalse(shouldLoadList(loadedListId = listId, requestedListId = listId))
+        assertFalse(shouldLoadList(loadedListId = null, requestedListId = null))
+    }
+
+    // ------------------------------------------------------------ setting a price and a quantity
+
+    @Test
+    fun `a typed price is accepted with a dot or a comma`() {
+        assertEquals(PriceEdit.Priced(4.5), parsePriceEdit("4.5"))
+        assertEquals(PriceEdit.Priced(4.5), parsePriceEdit(" 4,5 "))
+        assertEquals(PriceEdit.Priced(12.0), parsePriceEdit("12"))
+    }
+
+    @Test
+    fun `an empty price box clears the price on purpose`() {
+        assertEquals(PriceEdit.Cleared, parsePriceEdit(""))
+        assertEquals(PriceEdit.Cleared, parsePriceEdit("   "))
+    }
+
+    @Test
+    fun `garbage in the price box is refused instead of clearing the price`() {
+        assertEquals(PriceEdit.Invalid, parsePriceEdit("abc"))
+        assertEquals(PriceEdit.Invalid, parsePriceEdit("0"))
+        assertEquals(PriceEdit.Invalid, parsePriceEdit("-4"))
+        assertEquals(PriceEdit.Invalid, parsePriceEdit("NaN"))
+    }
+
+    @Test
+    fun `a quantity must be a positive number`() {
+        assertEquals(2.0, parseQuantityInput("2")!!, 0.0001)
+        assertEquals(1.5, parseQuantityInput("1,5")!!, 0.0001)
+        assertNull(parseQuantityInput(""))
+        assertNull(parseQuantityInput("0"))
+        assertNull(parseQuantityInput("-1"))
+        assertNull(parseQuantityInput("two"))
+    }
+
+    // ------------------------------------------------------------ when a trip is finished
+
+    @Test
+    fun `a trip with an item that was never posted stays open`() {
+        val posted = UUID.randomUUID()
+        val items = listOf(
+            item(name = "Milk", isChecked = true, convertedTransactionId = posted),
+            // Ticked but never priced, therefore never posted: this is the item the owner would
+            // otherwise lose when the trip disappears.
+            item(name = "Mystery item", isChecked = true, convertedTransactionId = null),
+        )
+
+        assertFalse(shouldArchiveTrip(items))
+    }
+
+    @Test
+    fun `a trip is finished once every item is in the ledger`() {
+        val posted = UUID.randomUUID()
+        val items = listOf(
+            item(name = "Milk", isChecked = true, convertedTransactionId = posted),
+            item(name = "Bread", isChecked = true, convertedTransactionId = posted),
+        )
+
+        assertTrue(shouldArchiveTrip(items))
+    }
+
+    @Test
+    fun `an empty trip is never archived by posting`() {
+        assertFalse(shouldArchiveTrip(emptyList()))
+    }
+
+    @Test
+    fun `only items without a transaction are still owed a ledger row`() {
+        val posted = UUID.randomUUID()
+        val items = listOf(
+            item(name = "Milk", convertedTransactionId = posted),
+            item(name = "Mystery item", convertedTransactionId = null),
+        )
+
+        assertEquals(listOf("Mystery item"), items.unpostedItems().map { it.name })
     }
 }

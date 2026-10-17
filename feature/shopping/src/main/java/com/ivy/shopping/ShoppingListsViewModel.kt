@@ -38,6 +38,12 @@ class ShoppingListsViewModel @Inject constructor(
     private var newListName by mutableStateOf("")
     private var newListIsTemplate by mutableStateOf(false)
 
+    /**
+     * True while a trip is being created. Without it, a second tap (or the same gesture reaching the
+     * row as well as the button) creates two trips and the two navigations fight over the screen.
+     */
+    private var creatingTrip by mutableStateOf(false)
+
     init {
         viewModelScope.launch { reload() }
     }
@@ -97,18 +103,28 @@ class ShoppingListsViewModel @Inject constructor(
     /**
      * "New trip from template": the template's items become a brand new trip, and the template itself
      * is left exactly as it was - it is never ticked and never posted.
+     *
+     * The trip is written first and navigated to only afterwards, so the screen it opens always has
+     * its list and its copied items behind it.
      */
     private fun createTripFromTemplate(templateId: UUID) {
+        if (creatingTrip) return
+        creatingTrip = true
         viewModelScope.launch {
-            val template = shoppingListDao.findById(templateId) ?: return@launch
-            val templateItems = shoppingItemDao.findByListId(templateId)
-            val tripId = UUID.randomUUID()
-            writeShoppingListDao.save(
-                template.toNewTrip(id = tripId, orderNum = rowCount().toDouble())
-            )
-            writeShoppingItemDao.save(copiedItemsForTrip(templateItems, tripId))
-            reload()
-            navigation.navigateTo(ShoppingListScreen(tripId))
+            try {
+                val template = shoppingListDao.findById(templateId) ?: return@launch
+                val templateItems = shoppingItemDao.findByListId(templateId)
+                val tripId = UUID.randomUUID()
+                writeShoppingListDao.save(
+                    template.toNewTrip(id = tripId, orderNum = rowCount().toDouble())
+                )
+                writeShoppingItemDao.save(copiedItemsForTrip(templateItems, tripId))
+                reload()
+                navigation.navigateTo(ShoppingListScreen(tripId))
+            } finally {
+                // Also on cancellation: the flag must not stay stuck if the screen goes away.
+                creatingTrip = false
+            }
         }
     }
 

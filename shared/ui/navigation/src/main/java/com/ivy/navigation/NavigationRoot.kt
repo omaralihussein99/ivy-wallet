@@ -5,12 +5,29 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.remember
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 
 @SuppressLint("ComposeCompositionLocalUsage")
 private val LocalNavigation = compositionLocalOf<Navigation> { error("No LocalNavigation") }
+
+/**
+ * A ViewModel store that belongs to exactly one screen.
+ *
+ * The store is created together with the screen and cleared when the screen goes away, so a
+ * navigation can only ever destroy the ViewModels of the screen that is being left - never the
+ * ViewModels of the screen that is opening. Clearing the host's store from a disposal callback
+ * cannot promise that: disposals run after the next screen has already composed and created its
+ * ViewModel, so the new screen used to be killed in the middle of its first load and rendered
+ * empty until it was opened a second time.
+ */
+private class ScreenViewModelStoreOwner : ViewModelStoreOwner {
+    override val viewModelStore: ViewModelStore = ViewModelStore()
+}
 
 @Composable
 fun NavigationRoot(
@@ -20,16 +37,19 @@ fun NavigationRoot(
     CompositionLocalProvider(
         LocalNavigation provides navigation,
     ) {
-        val viewModelStore = LocalViewModelStoreOwner.current
-        DisposableEffect(navigation.currentScreen) {
-            onDispose {
-                // Destroy viewModels only for non-legacy screens
-                if (navigation.lastScreen?.isLegacy == false) {
-                    viewModelStore?.viewModelStore?.clear()
-                }
+        val screen = navigation.currentScreen
+        if (screen?.isLegacy != false) {
+            // Legacy screens keep using the host's store, exactly as before.
+            navGraph(screen)
+        } else {
+            val screenStore = remember(screen) { ScreenViewModelStoreOwner() }
+            CompositionLocalProvider(LocalViewModelStoreOwner provides screenStore) {
+                navGraph(screen)
+            }
+            DisposableEffect(screenStore) {
+                onDispose { screenStore.viewModelStore.clear() }
             }
         }
-        navGraph(navigation.currentScreen)
     }
 }
 

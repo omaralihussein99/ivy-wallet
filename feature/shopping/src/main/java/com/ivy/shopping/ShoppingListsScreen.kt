@@ -167,14 +167,20 @@ private fun ShoppingListRow(
     onDelete: () -> Unit,
     onNewTrip: (() -> Unit)?,
 ) {
+    // The row's own click area stops before the buttons on purpose: the "start a trip" button used
+    // to sit inside the row's clickable region, so one tap could open the template *and* start a
+    // trip, and the two navigations raced each other.
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onOpen)
             .padding(start = 24.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onOpen)
+        ) {
             Text(
                 text = row.name,
                 style = MaterialTheme.typography.titleMedium,

@@ -28,6 +28,23 @@ with a box per item" is impossible. A trip becomes **one expense row per item**,
 the same account and the trip name as the title. This is the only shape that preserves each item's own
 price and its own category, which is what keeps reports honest.
 
+> **AMENDED after the owner used the build.** The reasoning above still holds about what Ivy can
+> *store*: there is still no multi-line transaction, and nothing here added one. What changed is that
+> "one big transaction" does not need a multi-line transaction - it needs the items to be findable from
+> the transaction. They already are: every item a trip posts is stamped with
+> `shopping_items.convertedTransactionId`. Pointing **every** item of a trip at the **same**
+> transaction id gives one expense row whose breakdown is a single query away, with no schema change
+> at all (migration 132 stays frozen and unextended).
+>
+> So decision 2 is now: **one transaction with an itemized breakdown (default) OR one row per item
+> (option)**, chosen at checkout. The single row carries one amount, one account and one category (the
+> category is pre-filled from the most common item category and can be changed); the per-item
+> categories stay on the items and are shown in the transaction's breakdown. The per-item shape is
+> unchanged and still keeps each item's own category on its own ledger row.
+>
+> Related, from the same round of feedback: a trip is archived only when **every** item on it is in
+> the ledger. Archiving it after a partial checkout silently dropped the items that were never priced.
+
 **Ticking never interrupts.** No price sheet pops up per tick - the tenth tick in a busy aisle would be
 unbearable. Ticking is silent; one Checkout action reviews every ticked item at once. This also means
 the single-item case is the multi-item case with one row, so there is one code path, not two.

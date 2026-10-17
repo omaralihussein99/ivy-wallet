@@ -117,6 +117,7 @@ fun BoxWithConstraintsScope.EditTransactionScreen(screen: EditTransactionScreen)
         loanData = uiState.displayLoanHelper,
         backgroundProcessing = uiState.backgroundProcessingStarted,
         customExchangeRateState = uiState.customExchangeRateState,
+        shoppingBreakdown = uiState.shoppingBreakdown,
 
         categories = uiState.categories,
         accounts = uiState.accounts,
@@ -233,6 +234,8 @@ private fun BoxWithConstraintsScope.UI(
     loanData: EditTransactionDisplayLoan = EditTransactionDisplayLoan(),
     backgroundProcessing: Boolean = false,
     hasChanges: Boolean = false,
+    /** Present only for a transaction a shopping trip produced. */
+    shoppingBreakdown: ShoppingBreakdownViewState? = null,
 
     ) {
     var chooseCategoryModalVisible by remember { mutableStateOf(false) }
@@ -383,6 +386,12 @@ private fun BoxWithConstraintsScope.UI(
             onEditDate = onSetDate,
             onEditTime = onSetTime,
         )
+
+        if (shoppingBreakdown != null) {
+            Spacer(Modifier.height(20.dp))
+
+            ShoppingItemsBreakdown(state = shoppingBreakdown)
+        }
 
         if (transactionType == TransactionType.TRANSFER && customExchangeRateState.showCard) {
             Spacer(Modifier.height(12.dp))

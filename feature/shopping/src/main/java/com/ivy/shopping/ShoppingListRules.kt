@@ -7,10 +7,15 @@ import java.util.UUID
 /**
  * Pure shopping list rules. No Android, no database - so they can be unit tested directly.
  *
- * The shape they encode: a trip is ticked in the shop, then every ticked item is posted to the
- * ledger as its own expense line. Ivy has no multi-line transaction (no split support anywhere in
- * the code base), so one row per item is the only representation that keeps each item's own price
- * and its own category.
+ * The shape they encode: a trip is ticked in the shop, then posted to the ledger in one of two
+ * ways, chosen by the user at checkout (see [ShoppingCheckoutMode]):
+ *
+ *  - one transaction for the whole trip, with every item of the trip pointing at it through
+ *    `shopping_items.convertedTransactionId`, so the transaction screen can show the breakdown;
+ *  - one expense row per item, which is what the feature shipped with.
+ *
+ * Both shapes keep each item's own price; the per-item shape additionally keeps each item's own
+ * category on its own ledger row.
  */
 
 /**
@@ -104,6 +109,50 @@ internal fun copiedItemsForTrip(
     )
 }
 
+// ---------------------------------------------------------------- screen state
+
+/**
+ * The detail screen is opened with a list id, and the id is an argument, not a process-wide
+ * setting: it has to load whatever list it was opened with, and load it again when the screen is
+ * reused for another id. A view model that captured the id once in its constructor kept showing an
+ * empty screen for the next list.
+ */
+internal fun shouldLoadList(loadedListId: UUID?, requestedListId: UUID?): Boolean =
+    requestedListId != null && requestedListId != loadedListId
+
+// ---------------------------------------------------------------- editing an item
+
+/**
+ * What the user typed into an item's price box, when saving it from the item editor.
+ *
+ * This is stricter than [parsePriceInput], which is about the checkout sheet and treats anything
+ * unusable as "no price". Here a blank box means the user really wants to clear the price, while
+ * garbage has to be refused instead of silently clearing a price the user has already set.
+ */
+internal sealed interface PriceEdit {
+    data object Cleared : PriceEdit
+    data class Priced(val value: Double) : PriceEdit
+    data object Invalid : PriceEdit
+}
+
+internal fun parsePriceEdit(text: String): PriceEdit {
+    val normalised = text.trim().replace(',', '.')
+    if (normalised.isEmpty()) return PriceEdit.Cleared
+    val value = normalised.toDoubleOrNull() ?: return PriceEdit.Invalid
+    return if (value > 0.0 && value.isFinite()) PriceEdit.Priced(value) else PriceEdit.Invalid
+}
+
+/**
+ * A quantity as the user typed it. Anything that is not a positive, finite number is refused: a
+ * quantity of zero would make a line total meaningless and a negative one would flip its sign.
+ */
+internal fun parseQuantityInput(text: String): Double? {
+    val normalised = text.trim().replace(',', '.')
+    if (normalised.isEmpty()) return null
+    val value = normalised.toDoubleOrNull() ?: return null
+    return if (value > 0.0 && value.isFinite()) value else null
+}
+
 // ---------------------------------------------------------------- checkout sheet
 
 /** Everything ticked and not yet posted, which is exactly what the checkout sheet reviews. */
@@ -194,6 +243,74 @@ internal fun checkoutTotal(
     priceText: Map<UUID, String>,
     fallbackAccountId: UUID? = null,
 ): Double = resolvedCheckoutRows(drafts, priceText, fallbackAccountId).sumOf { it.amount }
+
+/**
+ * How a finished trip is posted. One transaction for the whole trip is the default because that is
+ * what the owner asked for; the per-item rows stay available because they are the only shape that
+ * keeps each item's own category on its own ledger row.
+ */
+enum class ShoppingCheckoutMode { SingleTransaction, RowPerItem }
+
+/**
+ * The category a whole-trip transaction is pre-filled with: the category most of the trip's items
+ * already carry. Null when none of them has one, in which case the sheet offers "no category".
+ */
+internal fun mostCommonCategoryId(items: List<ShoppingItemEntity>): UUID? = items
+    .mapNotNull { it.categoryId }
+    .groupingBy { it }
+    .eachCount()
+    .maxByOrNull { it.value }
+    ?.key
+
+/**
+ * The single ledger row a whole trip will become.
+ *
+ * The category is one category for the whole row - that is the price of posting one row instead of
+ * many - and the per-item categories stay on the items and are shown in the breakdown. Null means
+ * "do not post": no account to pay from, or nothing on the trip has a usable price. A 0.00
+ * transaction is never posted.
+ */
+internal data class SingleCheckoutLine(
+    val title: String,
+    val amount: Double,
+    val accountId: UUID,
+    val categoryId: UUID?,
+)
+
+internal fun buildSingleTransactionLine(
+    drafts: List<CheckoutDraft>,
+    priceText: Map<UUID, String>,
+    tripName: String,
+    accountId: UUID?,
+    categoryId: UUID?,
+): SingleCheckoutLine? {
+    val payingAccountId = accountId ?: return null
+    val rows = resolvedCheckoutRows(drafts, priceText, fallbackAccountId = payingAccountId)
+    if (rows.isEmpty()) return null
+    val total = rows.sumOf { it.amount }
+    if (total <= 0.0) return null
+    return SingleCheckoutLine(
+        title = tripName,
+        amount = total,
+        accountId = payingAccountId,
+        categoryId = categoryId,
+    )
+}
+
+/**
+ * The items that are still owed a ledger row. Whatever already carries a transaction id was posted
+ * and must never be posted again - that is the same guard per-item mode uses, applied before a
+ * whole-trip post so a second tap can never pay for the same item twice.
+ */
+internal fun List<ShoppingItemEntity>.unpostedItems(): List<ShoppingItemEntity> =
+    filter { it.convertedTransactionId == null }
+
+/**
+ * A trip is finished only when every one of its items is in the ledger. Archiving a trip while
+ * something on it was never priced (and therefore never posted) would quietly throw that item away.
+ */
+internal fun shouldArchiveTrip(items: List<ShoppingItemEntity>): Boolean =
+    items.isNotEmpty() && items.all { it.convertedTransactionId != null }
 
 /**
  * The ledger lines the sheet will write: one expense per resolved row, titled with the trip's name

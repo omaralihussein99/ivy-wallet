@@ -34,4 +34,17 @@
     <string name="checkout_summary">%1$d of %2$d items will be posted</string>
     <string name="checkout_no_options">Nothing to pick from yet.</string>
     <string name="post_to_ledger">Post to ledger</string>
+
+    <string name="checkout_mode_hint">How to post this trip</string>
+    <string name="checkout_mode_single">One transaction (total)</string>
+    <string name="checkout_mode_rows">One row per item</string>
+    <string name="checkout_summary_single">%1$d priced items will become one transaction</string>
+    <string name="checkout_single_hint">The whole trip becomes one expense. Its items stay visible inside it, and you can still change the amount afterwards.</string>
+    <string name="checkout_nothing_priced">Nothing is priced yet. Enter at least one price, otherwise the trip won\'t be posted.</string>
+
+    <string name="edit_item">Edit item</string>
+    <string name="item_price">Unit price</string>
+    <string name="item_quantity">Quantity</string>
+    <string name="save">Save</string>
+    <string name="item_editor_no_price_hint">Leave the price empty to keep it as "not priced yet".</string>
 </resources>

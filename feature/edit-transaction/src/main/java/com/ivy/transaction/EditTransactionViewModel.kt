@@ -18,6 +18,7 @@ import com.ivy.base.time.TimeConverter
 import com.ivy.base.time.TimeProvider
 import com.ivy.data.db.dao.read.LoanDao
 import com.ivy.data.db.dao.read.SettingsDao
+import com.ivy.data.db.dao.read.ShoppingItemDao
 import com.ivy.data.model.Category
 import com.ivy.data.model.CategoryId
 import com.ivy.data.model.Tag
@@ -43,6 +44,7 @@ import com.ivy.navigation.EditTransactionScreen
 import com.ivy.navigation.MainScreen
 import com.ivy.navigation.Navigation
 import com.ivy.ui.ComposeViewModel
+import com.ivy.ui.FormatMoneyUseCase
 import com.ivy.ui.R
 import com.ivy.ui.time.impl.DateTimePicker
 import com.ivy.wallet.domain.action.account.AccountByIdAct
@@ -103,6 +105,11 @@ class EditTransactionViewModel @Inject constructor(
     private val transactionMapper: TransactionMapper,
     private val tagRepository: TagRepository,
     private val tagMapper: TagMapper,
+    private val shoppingItemDao: ShoppingItemDao,
+    /**
+     * The only thing allowed to render money: it knows the user's decimal and grouping settings.
+     */
+    private val formatMoney: FormatMoneyUseCase,
     private val features: Features,
     private val timeConverter: TimeConverter,
     private val timeProvider: TimeProvider,
@@ -126,6 +133,9 @@ class EditTransactionViewModel @Inject constructor(
     private var amount by mutableDoubleStateOf(0.0)
     private var hasChanges by mutableStateOf(false)
     private var displayLoanHelper by mutableStateOf(EditTransactionDisplayLoan())
+
+    /** The shopping items behind this transaction, when it came from a shopping trip. */
+    private var shoppingBreakdown by mutableStateOf<ShoppingBreakdownViewState?>(null)
 
     private var paidHistory: Instant? = null
 
@@ -183,7 +193,47 @@ class EditTransactionViewModel @Inject constructor(
                 tagRepository.findByAssociatedId(AssociationId(loadedTransaction().id)).map(Tag::id)
                     .toImmutableList()
             display(loadedTransaction!!)
+            shoppingBreakdown = loadShoppingBreakdown(
+                transactionId = screen.initialTransactionId,
+                transactionAmount = amount,
+            )
         }
+    }
+
+    /**
+     * The items a shopping trip was made of.
+     *
+     * Both checkout modes leave the link behind: every item a trip posted points at the transaction it
+     * produced through `shopping_items.convertedTransactionId`, so one query answers "what was in this
+     * purchase" for a whole-trip transaction and for a per-item one alike. A transaction with no items
+     * pointing at it returns null, which is why the section only appears for shopping transactions.
+     */
+    private suspend fun loadShoppingBreakdown(
+        transactionId: UUID?,
+        transactionAmount: Double,
+    ): ShoppingBreakdownViewState? {
+        if (transactionId == null) return null
+        val items = shoppingItemDao.findByConvertedTransactionId(transactionId)
+        if (items.isEmpty()) return null
+
+        val rows = items.map { item ->
+            val price = item.unitPrice
+            ShoppingBreakdownRow(
+                itemId = item.id.toString(),
+                name = item.name,
+                quantityText = formatQuantityText(item.quantity),
+                lineTotalText = price?.let {
+                    formatMoney.format(it * item.quantity, shortenAmount = false)
+                }.orEmpty(),
+                categoryLabel = item.categoryId?.let { id ->
+                    categoryRepository.findById(CategoryId(id))?.name?.value
+                },
+            )
+        }
+        return ShoppingBreakdownViewState(
+            rows = rows,
+            totalText = formatMoney.format(transactionAmount, shortenAmount = false),
+        )
     }
 
     @Composable
@@ -207,8 +257,14 @@ class EditTransactionViewModel @Inject constructor(
             backgroundProcessingStarted = getBackgroundProcessingStarted(),
             customExchangeRateState = getCustomExchangeRateState(),
             tags = getTags(),
-            transactionAssociatedTags = getTransactionAssociatedTags()
+            transactionAssociatedTags = getTransactionAssociatedTags(),
+            shoppingBreakdown = getShoppingBreakdown(),
         )
+    }
+
+    @Composable
+    private fun getShoppingBreakdown(): ShoppingBreakdownViewState? {
+        return shoppingBreakdown
     }
 
     @Composable

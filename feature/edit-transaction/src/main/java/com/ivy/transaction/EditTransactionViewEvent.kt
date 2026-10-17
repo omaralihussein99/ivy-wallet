@@ -35,7 +35,12 @@ data class EditTransactionViewState(
     val backgroundProcessingStarted: Boolean,
     val customExchangeRateState: CustomExchangeRateState,
     val tags: ImmutableList<Tag>,
-    val transactionAssociatedTags: ImmutableList<TagId>
+    val transactionAssociatedTags: ImmutableList<TagId>,
+    /**
+     * The shopping items the transaction was made of, or null for every transaction a shopping trip
+     * did not produce. This is what puts the "Shopping items" section on this screen.
+     */
+    val shoppingBreakdown: ShoppingBreakdownViewState? = null,
 )
 
 sealed interface EditTransactionViewEvent {

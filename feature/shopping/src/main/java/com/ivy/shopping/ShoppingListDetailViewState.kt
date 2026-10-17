@@ -22,6 +22,8 @@ data class ShoppingListDetailViewState(
      */
     val canCheckout: Boolean,
     val checkout: ShoppingCheckoutViewState?,
+    /** The explicit "set a price and a quantity" editor, open for one item at a time. */
+    val itemEditor: ShoppingItemEditorViewState?,
 )
 
 data class ShoppingItemRowViewState(
@@ -34,6 +36,19 @@ data class ShoppingItemRowViewState(
      * "2 × 4.50 = 9.00", already formatted by the view model, or null when there is nothing to say.
      */
     val detailText: String?,
+)
+
+/**
+ * Editing an item is an explicit action, opened from the item's own row. It is never a side effect of
+ * ticking: ticking stays silent, exactly as before.
+ */
+data class ShoppingItemEditorViewState(
+    val itemId: UUID,
+    val title: String,
+    val priceText: String,
+    val quantityText: String,
+    /** False while a field holds something that is not a usable price/quantity. */
+    val canSave: Boolean,
 )
 
 /** One box per ticked item on the checkout sheet. */
@@ -54,14 +69,24 @@ data class ShoppingCheckoutViewState(
     val rows: List<ShoppingCheckoutRowViewState>,
     val totalText: String,
     val canConfirm: Boolean,
-    /** How many ledger lines the sheet will really write. The rest are skipped, not posted as zero. */
+    /** How many items the checkout will really post. The rest are skipped, not posted as zero. */
     val postableCount: Int,
     val picker: ShoppingPickerViewState?,
+    val mode: ShoppingCheckoutMode,
+    /** The one account the whole trip is paid from, in single-transaction mode. */
+    val tripAccountLabel: String?,
+    /** The one category the whole-trip row gets; null means "no category". */
+    val tripCategoryLabel: String?,
+    /** Set when Confirm was refused because nothing on the trip has a usable price. */
+    val refusedEmptyTotal: Boolean,
+    /** True from the moment Confirm is tapped until the post finishes, so it can't be tapped twice. */
+    val posting: Boolean,
 )
 
 /** Accounts and categories are picked from the same dialog, one row of the sheet at a time. */
 data class ShoppingPickerViewState(
-    val itemId: UUID,
+    /** The row the pick applies to; null means the pick applies to the whole trip. */
+    val itemId: UUID?,
     val kind: ShoppingPickKind,
     val options: List<ShoppingPickOption>,
 )
@@ -81,12 +106,22 @@ sealed interface ShoppingListDetailEvent {
     data object OnAddItem : ShoppingListDetailEvent
     data class OnToggleItem(val itemId: UUID) : ShoppingListDetailEvent
     data class OnDeleteItem(val itemId: UUID) : ShoppingListDetailEvent
+
+    /** Opens the explicit price/quantity editor for one item. */
+    data class OnEditItem(val itemId: UUID) : ShoppingListDetailEvent
+    data class OnEditorPriceChange(val price: String) : ShoppingListDetailEvent
+    data class OnEditorQuantityChange(val quantity: String) : ShoppingListDetailEvent
+    data object OnEditorSave : ShoppingListDetailEvent
+    data object OnEditorDismiss : ShoppingListDetailEvent
+
     data object OnCheckoutClick : ShoppingListDetailEvent
     data object OnCheckoutDismiss : ShoppingListDetailEvent
+    data class OnCheckoutModeChange(val mode: ShoppingCheckoutMode) : ShoppingListDetailEvent
     data class OnCheckoutPriceChange(val itemId: UUID, val price: String) : ShoppingListDetailEvent
-    data class OnCheckoutAccountClick(val itemId: UUID) : ShoppingListDetailEvent
-    data class OnCheckoutCategoryClick(val itemId: UUID) : ShoppingListDetailEvent
-    data class OnCheckoutPick(val itemId: UUID, val optionId: UUID?) : ShoppingListDetailEvent
+    /** [itemId] is null for the whole-trip account/category used by single-transaction mode. */
+    data class OnCheckoutAccountClick(val itemId: UUID?) : ShoppingListDetailEvent
+    data class OnCheckoutCategoryClick(val itemId: UUID?) : ShoppingListDetailEvent
+    data class OnCheckoutPick(val itemId: UUID?, val optionId: UUID?) : ShoppingListDetailEvent
     data object OnCheckoutPickerDismiss : ShoppingListDetailEvent
     data object OnCheckoutConfirm : ShoppingListDetailEvent
 }
