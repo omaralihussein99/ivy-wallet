@@ -500,7 +500,7 @@
 
     <!-- Account hierarchy (parent/child accounts, rolled-up balances) -->
     <string name="account_hierarchy_title">Account hierarchy</string>
-    <string name="account_hierarchy_entry">Accounts</string>
+    <string name="account_hierarchy_entry">Account hierarchy</string>
     <string name="account_hierarchy_total">Total (accounts only): %1$s %2$s</string>
     <string name="account_hierarchy_own">Own: %1$s</string>
     <string name="account_hierarchy_rolled_up">Rolled up: %1$s</string>

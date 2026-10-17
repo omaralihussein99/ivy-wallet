@@ -552,7 +552,7 @@ private fun QuickAccess(
 
             MoreMenuButton(
                 icon = R.drawable.home_more_menu_shopping_list,
-                label = "Shopping",
+                label = stringResource(R.string.shopping),
             ) {
                 nav.navigateTo(com.ivy.navigation.ShoppingListsScreen)
             }
