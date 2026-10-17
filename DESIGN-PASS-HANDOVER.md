@@ -1,8 +1,9 @@
-# Design pass — part 1 handover (dependency plumbing + account hierarchy + backups)
+# Design pass — handover (part 1: plumbing + hierarchy + backups, part 2: shopping)
 
 Status: **compiles, unit tests green, visual parity NOT verified.**
-No app build (`:app:assembleDemo`) and no screenshots were produced in this part; visual parity is
-deferred to the app build that follows the full pass.
+No app build (`:app:assembleDemo`) and no screenshots were produced in either part; visual parity is
+deferred to the app build that follows the full pass. Part 2 (the three shopping screens) is in
+section 8.
 
 ## 0. Reconciliation performed before any edit
 
@@ -126,3 +127,138 @@ messages.
   to prove the dependency addition did not break a consuming module.
 - `feature/backup` has no JVM unit tests at all (only the shared backup logic in
   `shared/data/core`, which was not modified).
+
+## 8. Part 2 — the three shopping screens
+
+Starting point: `4f0f3ce` (this document), tree clean. `4def39d` was read in full before any edit
+and none of its behaviour was reverted (see 8.6).
+
+Only two files changed: `feature/shopping/src/main/java/com/ivy/shopping/ShoppingListsScreen.kt` and
+`.../ShoppingListDetailScreen.kt`. No view model, no rule, no service, no string, no test was touched.
+
+### 8.1 Screen 1 — shopping lists (`ShoppingListsScreen.kt`)
+
+| Before (Material3) | After (Ivy) |
+| --- | --- |
+| `Scaffold` + `TopAppBar` + `BackButton` | no shell; root `BoxWithConstraints(fillMaxSize().background(UI.colors.pure))`, title as the first list item |
+| — | `Text(stringResource(shopping_lists))` in `UI.typo.h2` ExtraBold `pureInverse`, 32dp top / 24dp start (the `CategoriesScreen` treatment) |
+| `FloatingActionButton` + `Icons.Filled.Add` | `BackBottomBar { IvyButton(text = "New shopping list", iconStart = ic_plus) }` (back is the bar's own circle button) |
+| back navigation from the toolbar | `BackBottomBar(onBack = ...)` |
+| `HorizontalDivider` between rows | settings-style cards: `padding(horizontal = 16.dp)`, `clip(UI.shapes.r4)`, `border(2.dp, UI.colors.medium, UI.shapes.r4)`, 16dp gaps between cards |
+| `labelLarge` primary section header | `SettingsSectionDivider` recipe: 32dp spacer + `UI.typo.b2` Bold `UI.colors.gray` at 32dp start + 16dp |
+| `titleMedium` row title | `UI.typo.b1` ExtraBold `pureInverse`, `maxLines = 1` + ellipsis |
+| `bodySmall` subtitle | `UI.typo.nB2` Normal `UI.colors.gray` at 14.sp, `maxLines = 1` + ellipsis |
+| `IconButton` + `Icons.Filled.PlayArrow` | `CircleButtonFilled(icon = ic_arrow_right, contentDescription = new_trip_from_template)` |
+| `IconButton` + `Icons.Filled.Delete` | `DeleteButton()` |
+| `AlertDialog` + `OutlinedTextField` + `Switch` + `TextButton`s | `IvyModal` + `ModalTitle` + `IvyNameTextField` (its own underline) + a settings-style row with `IvySwitch` + `ModalAdd` |
+| `bodyLarge`/`onSurfaceVariant` empty state | `UI.typo.b2` Medium `UI.colors.gray`, centred |
+| 88dp tail spacer (for the FAB) | 150dp tail spacer (there is a bottom bar now) |
+| plain `LazyColumn` | `rememberScrollPositionListState(key = "shopping_lists_lazy_column")`, parity with Categories/Accounts |
+
+Kept verbatim: the item keys (`it.id`, `templates_header`, `trips_header`), the templates/trips split,
+the subtitle composition ("n of m items  ·  remaining"), the start-trip-only-for-templates rule, and
+the click-target fix — the open action is still an inner `Column(Modifier.weight(1f).clickable(...))`,
+never the whole card, so one tap cannot open the template *and* start a trip (the original comment is
+preserved). The modal keeps a stable `remember { UUID.randomUUID() }` id.
+
+### 8.2 Screen 2 — trip/template detail (`ShoppingListDetailScreen.kt`)
+
+| Before (Material3) | After (Ivy) |
+| --- | --- |
+| `Scaffold` + `TopAppBar` (name + `TextButton` Checkout + `IconButton` Delete) | `LazyColumn` with a sticky `IvyToolbar(onBack = ...)`: `UI.typo.b1` ExtraBold name (`maxLines = 1`, ellipsis, `weight(1f)`) and `DeleteButton()` trailing |
+| Checkout as a toolbar `TextButton`, hidden unless `canCheckout` | `BackBottomBar { IvyButton(text = "Checkout", iconStart = ic_check, enabled = viewState.canCheckout) }` — always visible, disabled like every other Ivy primary action (two pill actions do not fit one toolbar) |
+| `labelMedium`/`bodyMedium` header | `UI.typo.c` Bold uppercase grey caption (template label), `UI.typo.nB2` grey progress line, `UI.typo.b1` ExtraBold `pureInverse` for "Estimated left: …" |
+| `MaterialTheme.colorScheme.surfaceVariant`/`primary` progress track | the same local `ShoppingProgressBar`, recoloured to `UI.colors.medium` track / `UI.colors.primary` fill with `UI.shapes.rFull` (the app has no neutral progress component; the threshold-coloured `ProgressBar` was not used) |
+| `OutlinedTextField` for a new item | `IvyChecklistTextField` with `ImeAction.Done` firing add, plus `CircleButtonFilled(ic_plus)` |
+| `HorizontalDivider` | `IvyDividerLine()` (2dp `UI.colors.medium`), inset 24dp |
+| `Checkbox` | `IvyCheckbox` (48dp touch target) |
+| `bodyLarge` title | `UI.typo.b2`; when checked `UI.colors.gray` + `TextDecoration.LineThrough` |
+| `bodySmall` detail | `UI.typo.nC` `UI.colors.gray` |
+| `IconButton` + `Icons.Filled.Edit` | `CircleButton(icon = ic_edit)` |
+| `IconButton` + `Icons.Filled.Delete` | `DeleteButton()` |
+| `bodyMedium` empty/missing text | `UI.typo.nB2`/`b2` `UI.colors.gray` |
+
+Kept verbatim: ticking is still the row's own click (and the checkbox's), never the editor — the
+editor is only ever opened by `ic_edit`; a template still shows **no** checkbox at all
+(`showCheckbox = !viewState.isTemplate`); the item keys are still `it.id`; the live values
+(`itemsChecked`, `itemsTotal`, `progress`, `estimatedRemainingText`, `detailText`) and their single
+formatter (`FormatMoneyUseCase`, inside the view model) are unchanged.
+
+### 8.3 Item editor (part of screen 2)
+
+| Before | After |
+| --- | --- |
+| `AlertDialog` + two `OutlinedTextField`s + `TextButton`s | `IvyModal` + `ModalTitle` + two `IvyNumberTextField`s inside `GradientIvy` pills with `UI.typo.c` captions (the `IntervalPickerRow` precedent) + `ModalSave(enabled = editor.canSave)` |
+
+Kept: `KeyboardType.Decimal` on both fields, `ImeAction.Next` on price (moves focus down) and
+`ImeAction.Done` on quantity (hides the keyboard), the `canSave` gate, and the "leave the price empty"
+hint.
+
+### 8.4 Checkout (part of screen 2)
+
+| Before | After |
+| --- | --- |
+| `ModalBottomSheet` + `rememberModalBottomSheetState` | `IvyModal` with a stable `remember { UUID.randomUUID() }` id — the owner explicitly accepted losing drag-to-expand and swipe-down; dismissal is tap-outside / back / the built-in close |
+| `LazyColumn` of rows inside the sheet | plain `Column` + `forEach`: `IvyModal` already applies `verticalScroll`, so a nested lazy list would be measured with an infinite height and crash |
+| second stacked `AlertDialog` for the account/category picker | the **same modal's second content state** (`sheet.picker != null` switches the body and the primary action to `ModalSet(label = "Cancel")`), never a second `IvyModal` |
+| `OutlinedButton` pair for the mode | selected = `IvyButton(backgroundGradient = GradientIvy)`, unselected = `IvyBorderButton(GradientIvy)`. `IvyOutlinedButton` was deliberately **not** used for that pair: it has no `enabled` parameter |
+| `OutlinedTextField` per row with `isError` | `IvyNumberTextField` in a pill: `GradientIvy` when the row is priced, `Gradient.solid(UI.colors.medium)` when it will be skipped; text White/bold vs `pureInverse`, red "skipped" text, live line total in `UI.typo.nB2` |
+| `labelMedium` "Total" + `titleMedium` amount | `UI.typo.c` Bold uppercase grey label + the `AmountCurrencyB1` treatment (`nB1`/`b1` 20sp bold `pureInverse`) on the already-formatted string |
+| `Button` confirm | `ModalPositiveButton(text = "Post to ledger", iconStart = ic_check, enabled = sheet.canConfirm && !sheet.posting)` |
+| `colorScheme.error` refusal | `UI.typo.nB2` `UI.colors.red` |
+| per-row account/category `OutlinedButton`s | `IvyBorderButton`s (`wrapContentMode = false`, `weight(1f)`) |
+
+Decision worth recording: the money strings arrive pre-formatted (`estimatedRemainingText`,
+`totalText`, `lineTotalText`), and `AmountCurrencyB1` takes a `Double` and would re-format them. The
+composable is therefore not called; its typography (20sp, bold, `pureInverse`) is applied to the text
+the view model produced, exactly as part 1 did for the hierarchy grand total. Money formatting stays
+in `FormatMoneyUseCase`.
+
+Two scroll states are kept (one for the review, one for the picker) so opening the picker after
+scrolling the review starts at the top instead of at the shared offset.
+
+### 8.5 Imports
+
+Both files now import exactly one Material3 symbol, `Text`, and there is no `Icons.*` import at all;
+actions use the app's drawables (`ic_plus`, `ic_delete` via `DeleteButton`, `ic_edit`, `ic_check`,
+`ic_arrow_right`). Everything else is `UI.colors` / `UI.typo` / `UI.shapes` and the
+`temp:legacy-code` / `temp:old-design` components.
+
+Scope plumbing: both entry points became `BoxWithConstraintsScope` extensions (part 1's pattern), so
+`IvyNavGraph` — itself a `BoxWithConstraintsScope` receiver — calls them unchanged. `IvyModal`
+usages are `BoxScope` extensions, which `BoxWithConstraintsScope` already is.
+
+### 8.6 Behaviour preserved from `4def39d`
+
+- One-transaction mode (default) still posts a single row with its items attached; "one row per item"
+  is still the alternative.
+- The trip still opens populated (`LaunchedEffect(listId) { viewModel.load(listId) }` untouched).
+- Item prices and quantities are still editable, with the same parse/gate rules.
+- Unpriced rows are skipped, never posted as zero, and the empty-total refusal still shows.
+- The double-post guard (`posting`) still disables the confirm action.
+- The `start-a-trip` button is still outside the row's click area.
+
+### 8.7 Verification of part 2
+
+- `:feature:shopping:assembleDebug` → `BUILD SUCCESSFUL in 40s`
+  (`C:\ivy-artifacts\design2-compile.log`; only deprecation warnings from the intentionally reused
+  legacy components).
+- `:feature:shopping:testDebugUnitTest` → `BUILD SUCCESSFUL in 29s`; JUnit XML:
+  `TEST-com.ivy.shopping.ShoppingCheckoutSheetRulesTest.xml` `tests="24" skipped="0" failures="0" errors="0"`,
+  `TEST-com.ivy.shopping.ShoppingListRulesTest.xml` `tests="27" skipped="0" failures="0" errors="0"` — 51, the baseline.
+- Grep: the only `androidx.compose.material` import left in either file is
+  `androidx.compose.material3.Text`; no `Icons.*`; no `Scaffold`/`TopAppBar`/`AlertDialog`/
+  `ModalBottomSheet`/`FloatingActionButton`/`OutlinedTextField`/`HorizontalDivider`/`TextButton`/
+  `IconButton`/`Checkbox`/`Switch`/`MaterialTheme` in either file.
+
+### 8.8 What part 2 does NOT verify
+
+- No app build and no screenshots: visual parity with Categories/Settings is unproven.
+- Dark / AMOLED rendering of `pure` (which is the whole point of the explicit background) is unproven.
+- Modal runtime behaviour is unproven: the shared scroll state swap between the review and the picker,
+  the keyboard shifting inside `IvyModal`, and the back-handler stack for the two modals were checked
+  only by reading `IvyModal` and by compilation.
+- `IvyChecklistTextField` is multi-line by design; on a long item name it will wrap where the old
+  single-line `OutlinedTextField` did not. Not observed on a device.
+- The taller cards (b1 title + 14sp subtitle + 16dp gaps) were not measured against a real screen.
+- Arabic/RTL were not touched, per the owner's English-only decision.
