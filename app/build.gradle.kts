@@ -36,10 +36,18 @@ android {
         }
 
         create("release") {
-            storeFile = file("../sign.jks")
-            storePassword = System.getenv("SIGNING_STORE_PASSWORD")
-            keyAlias = System.getenv("SIGNING_KEY_ALIAS")
-            keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            // Signing material lives outside the repo: ../sign.jks + SIGNING_* environment variables.
+            // When it is absent (e.g. a fork without the keystore) this config stays empty on purpose,
+            // so `assembleRelease` packages an UNSIGNED APK instead of failing at :app:packageRelease.
+            // Never commit a keystore or credentials here.
+            val releaseKeystore = file("../sign.jks")
+            val releaseStorePassword = System.getenv("SIGNING_STORE_PASSWORD")
+            if (releaseKeystore.exists() && releaseStorePassword != null) {
+                storeFile = releaseKeystore
+                storePassword = releaseStorePassword
+                keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            }
         }
     }
 
@@ -55,7 +63,10 @@ android {
             isDebuggable = false
             isDefault = false
 
-            signingConfig = signingConfigs.getByName("release")
+            // Only applied when key material exists; otherwise the release APK is left unsigned.
+            signingConfigs.getByName("release").takeIf { it.storeFile != null }?.let {
+                signingConfig = it
+            }
 
             resValue("string", "app_name", "Ivy Wallet")
         }
