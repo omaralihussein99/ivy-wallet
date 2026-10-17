@@ -204,17 +204,21 @@ private fun ShoppingListCard(
             .padding(horizontal = 16.dp)
             .fillMaxWidth()
             .clip(UI.shapes.r4)
+            // The click belongs to the card, not to the text column. The column sat inside the card's
+            // own 8dp vertical padding and 16dp start padding, so a tap that landed on the painted
+            // card - its top or bottom edge, or its left inset - hit no clickable at all and the row
+            // simply did nothing. Placing it here makes every point inside the border the open target.
+            .clickable(onClick = onOpen)
             .border(2.dp, UI.colors.medium, UI.shapes.r4)
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The row's own click area stops before the buttons on purpose: the "start a trip" button used
-        // to sit inside the row's clickable region, so one tap could open the template *and* start a
-        // trip, and the two navigations raced each other.
+        // No clickable here any more: the card owns the open action. The arrows and the delete button
+        // below are clickable children of this row, so Compose gives the tap to the child and the
+        // card's open is cancelled - one tap can no longer open the template *and* start a trip.
         Column(
             modifier = Modifier
                 .weight(1f)
-                .clickable(onClick = onOpen)
                 .padding(vertical = 8.dp)
         ) {
             Text(
