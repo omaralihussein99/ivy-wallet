@@ -2,4 +2,20 @@
     package="com.ivy.data">
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <!--
+            Relay that re-opens the app after LocalBackupRepository replaced the database and killed
+            the process. It runs in its OWN process so it survives that kill, and it is translucent /
+            excluded from recents so the user never sees it: it only forwards to the launcher
+            activity and finishes. Not exported: only our own app can start it.
+        -->
+        <activity
+            android:name="com.ivy.data.backup.local.RestoreRelaunchActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:process=":restoreRelaunch"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+    </application>
 </manifest>

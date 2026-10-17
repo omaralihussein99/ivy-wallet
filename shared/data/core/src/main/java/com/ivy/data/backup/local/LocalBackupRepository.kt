@@ -1,7 +1,5 @@
 package com.ivy.data.backup.local
 
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.sqlite.db.SimpleSQLiteQuery
@@ -71,12 +69,11 @@ import kotlin.system.exitProcess
  * Restore replaces the database file wholesale and then kills the process. The Room instance is a Hilt
  * `@Singleton` and closing it is irreversible, so a half-applied state is impossible by construction:
  * the swap is a single `rename(2)` (atomic on the same file system) and the process is terminated
- * immediately after it, before anything can touch the closed database. An **alarm clock alarm**
- * (`AlarmManager.setAlarmClock`) - which survives the death of the process and which the platform is
- * not allowed to defer - relaunches the app, which opens the restored file from scratch. Nothing is
- * served from memory in between, and no stale state survives the restart because the process is gone.
- * See [scheduleRelaunch] for why that is the only mechanism that is both permission-free and
- * non-deferrable on API 28-36.
+ * immediately after it, before anything can touch the closed database. A **relay activity in its own
+ * process** ([RestoreRelaunchActivity]) is started just before the kill and re-opens the app, which
+ * then opens the restored file from scratch. Nothing is served from memory in between, and no stale
+ * state survives the restart because the process is gone. See [scheduleRelaunch] for why a relay
+ * started while the app is still visible is the only mechanism Android 14+ allows.
  */
 @Singleton
 class LocalBackupRepository @Inject constructor(
@@ -88,8 +85,8 @@ class LocalBackupRepository @Inject constructor(
     /** Result of [restoreBackup]. */
     enum class RestoreResult {
         /**
-         * The database was replaced and the process is being killed. The relaunch is already
-         * scheduled, so the app comes back by itself about [RELAUNCH_DELAY_MILLIS] ms later.
+         * The database was replaced and the process is being killed. The relay activity that re-opens
+         * the app is already started, so the app comes back by itself within a second or so.
          */
         RESTARTING,
 
@@ -105,8 +102,12 @@ class LocalBackupRepository @Inject constructor(
 
     private companion object {
         const val INCOMING_SUFFIX = ".incoming"
-        const val RELAUNCH_REQUEST_CODE = 4201
-        const val RELAUNCH_DELAY_MILLIS = 1_000L
+
+        /**
+         * Pause between starting the relay activity and killing this process, so the platform has
+         * time to get the relay process going. It touches no files: the swap is already complete.
+         */
+        const val RELAUNCH_SETTLE_MILLIS = 300L
 
         /** How often the WAL checkpoint is retried before the backup attempt is abandoned. */
         const val CHECKPOINT_ATTEMPTS = 3
@@ -336,97 +337,38 @@ class LocalBackupRepository @Inject constructor(
     )
 
     /**
-     * Brings the app back after [exitProcess] has killed it.
+     * Re-opens the app after [exitProcess] kills the process.
      *
-     * `AlarmManager.setAlarmClock` is used, and it is the only mechanism used, because it is the only
-     * AlarmManager entry point that satisfies all three requirements at once:
+     * A **relay activity** is started now, while this app is still the visible foreground app, and it
+     * runs in its own process (`:restoreRelaunch`), so it survives the kill and can start the launcher
+     * activity of a brand new main process. [RestoreRelaunchActivity] documents the three
+     * background-initiated mechanisms that were implemented and measured on the API 36 device and that
+     * the platform refused with `BAL_BLOCK` (an activity PendingIntent fired by an alarm-clock alarm;
+     * the same with the `MODE_BACKGROUND_ACTIVITY_START_ALLOWED` creator opt-in; and a broadcast
+     * receiver that calls `startActivity`). A start issued by a *visible* activity is the only one
+     * Android 14+ allows, which is why the relay is started before the process dies instead of after.
      *
-     *  - **It cannot be deferred.** An alarm-clock alarm is exact, it is exempt from Doze and from
-     *    app-standby deferral, and the platform is not allowed to batch it. That is exactly what the
-     *    previous implementation lacked: a plain `set(...)` is inexact, and API 31+ is free to hold
-     *    an inexact alarm for minutes. Verified on the API 36 test device: the process was dead for
-     *    at least 3.5 minutes and the app never came back on its own.
-     *  - **It needs no permission.** From API 31, `setExactAndAllowWhileIdle(...)` throws
-     *    `SecurityException` unless the app holds `SCHEDULE_EXACT_ALARM`, and an app targeting 33+
-     *    only holds it after the user granted "Alarms & reminders". This app declares no such
-     *    permission, so `canScheduleExactAlarms()` is `false` here by construction: gating
-     *    `setExactAndAllowWhileIdle` on it would mean the exact branch is never taken and every
-     *    restore would fall back to a deferrable alarm - i.e. straight back to the original defect.
-     *    `setAlarmClock` is allowed on every API level 28-36 without any permission.
-     *  - **It outlives the process.** The alarm is held by the system, not by us. A `Handler`-based
-     *    relaunch cannot work here: the handler dies with the process, and an `startActivity` issued
-     *    from this process is cancelled by the same `exitProcess(0)` that makes a relaunch necessary
-     *    (the Room singleton is closed and cannot be reopened).
-     *
-     * The alarm fires [RELAUNCH_DELAY_MILLIS] ms after the swap and launches the launcher activity
-     * with `NEW_TASK or CLEAR_TASK`, so the restored database is opened by a brand new process with
-     * no state left over from the old one.
-     *
-     * Cost, stated plainly: while the alarm is pending the platform lists it in the system "next
-     * alarm" slot, so an alarm icon is visible for about a second. The alarm is one-shot; the icon
-     * disappears as soon as it fires.
-     *
-     * Last-resort fallback: if `setAlarmClock` itself throws (not observed on API 28-36; guarded so
-     * that a restore can never end with a replaced database and nothing scheduled at all), a
-     * `setAndAllowWhileIdle` alarm is scheduled instead and the degradation is logged as an error.
-     * That fallback **is** deferrable by the platform, so if it is ever taken the app can come back
-     * late; the log says exactly that. It is unreachable on a normal install.
+     * [RELAUNCH_SETTLE_MILLIS] is a short pause so the platform can get the relay process going before
+     * this one disappears. Nothing touches the database during it - the file is already swapped and
+     * Room is already closed - so it does not weaken any of the restore guarantees.
      */
     private fun scheduleRelaunch() {
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        if (launchIntent == null) {
-            // Unreachable for this app: it always has a MAIN/LAUNCHER activity.
-            Timber.e("No launch intent for %s, the restored app cannot be relaunched", context.packageName)
-            return
-        }
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            RELAUNCH_REQUEST_CODE,
-            launchIntent,
-            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-        if (alarmManager == null) {
-            Timber.e("No AlarmManager, the restored app cannot be relaunched")
-            return
-        }
-        val triggerAtMillis = System.currentTimeMillis() + RELAUNCH_DELAY_MILLIS
-
-        if (scheduleAlarmClock(alarmManager, triggerAtMillis, pendingIntent)) {
-            Timber.d("Restore relaunch scheduled with setAlarmClock at %d", triggerAtMillis)
-            return
-        }
-
-        Timber.e(
-            "setAlarmClock was refused - falling back to setAndAllowWhileIdle, " +
-                "which IS deferrable: the app may come back late."
-        )
+        val relayIntent = Intent(context, RestoreRelaunchActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         try {
-            alarmManager.setAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                triggerAtMillis,
-                pendingIntent,
-            )
-        } catch (e: RuntimeException) {
-            Timber.e(e, "Could not schedule the relaunch at all")
+            context.startActivity(relayIntent)
+            Timber.d("Restore relaunch: relay activity started")
+        } catch (e: Exception) {
+            Timber.e(e, "Restore relaunch: the relay activity could not be started")
+            return
         }
-    }
-
-    /** `true` when the alarm-clock alarm (exact, Doze-exempt, permission-free) was scheduled. */
-    private fun scheduleAlarmClock(
-        alarmManager: AlarmManager,
-        triggerAtMillis: Long,
-        pendingIntent: PendingIntent,
-    ): Boolean = try {
-        alarmManager.setAlarmClock(
-            AlarmManager.AlarmClockInfo(triggerAtMillis, pendingIntent),
-            pendingIntent,
-        )
-        true
-    } catch (e: RuntimeException) {
-        Timber.w(e, "setAlarmClock failed")
-        false
+        // Give the platform a moment to get the relay process going before this process disappears.
+        // Nothing touches the database during this pause: the file is already swapped and closed.
+        try {
+            Thread.sleep(RELAUNCH_SETTLE_MILLIS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
     }
 
     private fun hasSqliteHeader(file: File): Boolean = try {

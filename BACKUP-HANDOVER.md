@@ -126,9 +126,9 @@ transaction that was committed when it was taken.*
 5. The old sidecars (`-wal`, `-shm`, `-journal`) are deleted: they belong to the database being
    replaced and would otherwise be replayed into the restored file.
 6. One atomic `rename(2)` (atomic on the same file system) replaces `ivywallet.db`.
-7. An **alarm-clock alarm** (`AlarmManager.setAlarmClock`, which outlives the process and which the
-   platform is not allowed to defer) relaunches the app, and the process is killed with
-   `exitProcess(0)`.
+7. A **relay activity in its own process** (`RestoreRelaunchActivity`, process `:restoreRelaunch`) is
+   started while the app is still visible, the process is killed with `exitProcess(0)`, and the relay
+   re-opens the launcher activity in a brand-new main process.
 
 **What this does about the live database and in-memory state:** the file is replaced wholesale, so
 there is no half-applied state to fall back to — either the rename happened or it did not, and steps
@@ -142,34 +142,58 @@ removes every piece of stale in-memory state (DAO caches in other singletons, Co
 destructive actions (`DeleteConfirmationModal`'s typed delete button): the Restore button stays
 disabled until the user has typed the backup's file name exactly.
 
-### Why `setAlarmClock` and not a plain alarm (fixed after an on-device defect)
+### Why a relay activity and not an alarm (three mechanisms measured and rejected)
 
 The first implementation used `AlarmManager.set(context, RTC, now + 1s, pendingIntent)`. That is an
 **inexact** alarm: API 31+ is free to defer it, and in Doze/app-standby it can be batched
 indefinitely. Verified on the API 36 test device: after a restore the database swap was correct but
-the app never came back — `pidof com.ivy.wallet.debug` was empty at +12 s and still empty at +3.5
+the app never came back - `pidof com.ivy.wallet.debug` was empty at +12 s and still empty at +3.5
 minutes, with the launcher in front. The user had to open the app by hand.
 
-`setAlarmClock` is now the one and only relaunch mechanism (`LocalBackupRepository.scheduleRelaunch`):
+Making the alarm exact was **not** enough, and that is the important finding here: an alarm that
+carries an activity `PendingIntent` is refused by Android 14+ when the app has no process, because the
+platform classifies the start as a *background activity start*. Three variants were implemented,
+built, installed and measured on the emulator; all three were refused:
 
-* **It cannot be deferred.** An alarm-clock alarm is exact, exempt from Doze and app-standby
-  deferral, and the platform may not batch it.
-* **It needs no permission.** From API 31, `setExactAndAllowWhileIdle` throws `SecurityException`
-  unless the app holds `SCHEDULE_EXACT_ALARM`, and an app targeting 33+ only holds it after the user
-  granted "Alarms & reminders". This app declares no such permission and has no request flow, so
-  `canScheduleExactAlarms()` is `false` here by construction: gating on it would mean the exact branch
-  is never taken and every restore would fall back to a deferrable alarm again. `setAlarmClock` is
-  allowed on API 28-36 with no permission at all.
-* **It outlives the process.** The alarm is held by the system. A `Handler`-based relaunch cannot
-  work: the handler dies with the process, and a `startActivity` from this process is cancelled by the
-  same `exitProcess(0)` that makes the relaunch necessary.
+| Attempt | Result |
+| --- | --- |
+| `setAlarmClock` + `PendingIntent.getActivity` | alarm fired ~2.5 s after the swap; `Background activity launch blocked! ... callingUidProcState: NONEXISTENT ... balRequireOptInByPendingIntentCreator: true`; `Abort background activity starts`; `START ... (BAL_BLOCK) result code=102` |
+| the same plus `ActivityOptions.setPendingIntentBackgroundActivityStartMode(MODE_BACKGROUND_ACTIVITY_START_ALLOWED)` (the creator-side opt-in) | byte-identical `BAL_BLOCK` verdict - the opt-in changes nothing |
+| `PendingIntent.getBroadcast` into a receiver that calls `startActivity` | the process *was* started (`Start proc ... for broadcast {...RestoreRelaunchReceiver}`) but the start was refused again (`callingUidProcState: RECEIVER`, `BAL_BLOCK`) |
 
-Cost, stated plainly: while the alarm is pending, the platform lists it in the system "next alarm"
-slot, so an alarm icon is visible for about a second.
+The one start Android allows is the one issued by a **visible activity**. So the relaunch now happens
+*before* the process dies, the way `ProcessPhoenix` does it: `LocalBackupRepository.scheduleRelaunch`
+starts `RestoreRelaunchActivity` (own process `:restoreRelaunch`, translucent, excluded from recents,
+`noHistory`) while the Backups screen is still in front, waits 300 ms so the platform can get that
+process going, and `applyRestore` then kills the main process. The relay survives the kill, and in
+`onResume` - i.e. once it is visibly resumed itself - it starts the launcher activity of a brand-new
+main process with `NEW_TASK or CLEAR_TASK`.
 
-Fallback: if `setAlarmClock` ever throws (not observed on API 28-36), a `setAndAllowWhileIdle` alarm is
-scheduled and the degradation is logged at error level. **That fallback is still deferrable** — it
-exists only so a replaced database never ends with nothing scheduled at all.
+Properties, stated plainly:
+
+* **No permission at all** - no `SCHEDULE_EXACT_ALARM`, no "Alarms & reminders", no
+  `SYSTEM_ALERT_WINDOW`, no notification permission. (The notification route was checked and is not
+  available either: `POST_NOTIFICATIONS` is not granted for this build.)
+* **Nothing outlives the process on purpose**, so there is no alarm to be deferred and no alarm icon.
+* **The gap is the process restart itself**, not a platform policy.
+
+Measured on the API 36 emulator (light theme, emulator `MAUI_Emulator_API_36`):
+
+* Polling `pidof com.ivy.wallet.debug` right after tapping Restore: the first sample at 2.98 s already
+  shows the new process, and `dumpsys activity activities` reports
+  `topResumedActivity=ActivityRecord{... com.ivy.wallet.debug/com.ivy.wallet.RootActivity t86}` - i.e.
+  the app was back, in front and usable in **under three seconds**, with no tap from the user.
+* The restored database was byte-identical to the backup it came from
+  (`md5sum .../ivywallet.db` == `md5sum .../ivy-backup-1792259018058.db` == `6114cc453ac1c4cf431ebe2ea6ebefc1`)
+  and the UI showed the restored balance.
+* Failure path: with the backup file deleted between typing the name and pressing Restore, the app
+  stayed alive, showed "That backup is gone." and the live `ivywallet.db` md5 was unchanged
+  (`6114cc45...`).
+
+Known limitation, honestly: the relay is started from the foreground, so it relies on the process not
+being killed by the system in the 300 ms between `startActivity` and `exitProcess`. On this device that
+window was never lost (two independent restore runs), but it is a race by construction - the
+alternative (an alarm) is not a race but is refused by the platform outright.
 
 ---
 
@@ -232,8 +256,8 @@ locale-independent. If money is ever displayed on this screen it must go through
   lands in the folder, and that the rotation deletes the right files on a real device were unverified
   here; the restore-fix phase took and restored real backups on the emulator.
 * **No restore was performed in this phase.** The rename, the relaunch and `exitProcess(0)` were argued
-  from the code and the platform contract. They were later exercised on the API 36 emulator and the
-  plain-alarm defect above was found that way.
+  from the code and the platform contract. They were later exercised on the API 36 emulator, which is
+  how the relaunch defect described above was found and fixed.
 * **The WAL behaviour was not observed against a real on-device database.** The checkpoint's result,
   the "is `-wal` empty" check and the failure path that refuses to write a stale backup are reasoned
   about, and the pure parts are unit tested, but the Android-side file IO has no test.
