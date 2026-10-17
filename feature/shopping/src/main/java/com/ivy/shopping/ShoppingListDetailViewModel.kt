@@ -5,13 +5,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewModelScope
+import com.ivy.base.model.TransactionType
+import com.ivy.base.time.TimeConverter
 import com.ivy.data.db.dao.read.ShoppingItemDao
 import com.ivy.data.db.dao.read.ShoppingListDao
 import com.ivy.data.db.dao.write.WriteShoppingItemDao
 import com.ivy.data.db.dao.write.WriteShoppingListDao
 import com.ivy.data.db.entity.ShoppingItemEntity
+import com.ivy.data.model.TransactionId
+import com.ivy.data.model.getFromValue
 import com.ivy.data.repository.AccountRepository
 import com.ivy.data.repository.CategoryRepository
+import com.ivy.data.repository.TransactionRepository
+import com.ivy.navigation.EditTransactionScreen
 import com.ivy.navigation.Navigation
 import com.ivy.ui.ComposeViewModel
 import com.ivy.ui.FormatMoneyUseCase
@@ -29,6 +35,8 @@ class ShoppingListDetailViewModel @Inject constructor(
     private val writeShoppingItemDao: WriteShoppingItemDao,
     private val accountRepository: AccountRepository,
     private val categoryRepository: CategoryRepository,
+    private val transactionRepository: TransactionRepository,
+    private val timeConverter: TimeConverter,
     private val checkoutService: ShoppingCheckoutService,
     /**
      * Money is rendered by Ivy's own formatter, never with String.format: only this one knows the
@@ -55,6 +63,17 @@ class ShoppingListDetailViewModel @Inject constructor(
     // Formatted by the view model because FormatMoneyUseCase is a suspend function.
     private var estimatedRemainingText by mutableStateOf("")
     private var itemDetailTexts by mutableStateOf<Map<UUID, String>>(emptyMap())
+
+    // Price history: what the user paid for an item before, restricted to one currency.
+    private var postedPrices by mutableStateOf<List<PostedItemPrice>>(emptyList())
+    private var accountCurrencies by mutableStateOf<Map<UUID, String>>(emptyMap())
+    private var checkoutHistories by mutableStateOf<Map<UUID, PriceHistory>>(emptyMap())
+    private var checkoutHistoryPriceTexts by mutableStateOf<Map<UUID, String>>(emptyMap())
+
+    // Where this trip went, when it was posted. Null means "no entry point", never a dead one.
+    private var postedTransactionId by mutableStateOf<UUID?>(null)
+    private var postedEntryCount by mutableStateOf(0)
+    private var postedTransactionMissing by mutableStateOf(false)
 
     // Checkout sheet
     private var listAccountId by mutableStateOf<UUID?>(null)
@@ -83,6 +102,9 @@ class ShoppingListDetailViewModel @Inject constructor(
         if (!shouldLoadList(loadedListId = loadedListId, requestedListId = requestedListId)) return
         listId = requestedListId
         loadedListId = requestedListId
+        // What was paid before never depends on the list being opened, so it is loaded once per
+        // screen and reused by the checkout rows and the item editor.
+        postedPrices = loadPostedPrices()
         reload()
     }
 
@@ -99,6 +121,9 @@ class ShoppingListDetailViewModel @Inject constructor(
             listName = listName,
             exists = exists,
             isTemplate = isTemplate,
+            postedTransactionId = postedTransactionId,
+            postedEntryCount = postedEntryCount,
+            postedTransactionDeleted = postedTransactionMissing,
             items = items.map {
                 ShoppingItemRowViewState(
                     id = it.id,
@@ -135,6 +160,9 @@ class ShoppingListDetailViewModel @Inject constructor(
                             lineTotalText = draftLineTotalTexts[draft.itemId].orEmpty(),
                             skipped = parsePriceInput(draftPrices[draft.itemId].orEmpty()) == null,
                             hasAccount = draft.accountId != null,
+                            historyPriceText = checkoutHistoryPriceTexts[draft.itemId],
+                            historyTimes = checkoutHistories[draft.itemId]?.times ?: 0,
+                            historyCurrency = checkoutHistories[draft.itemId]?.currency,
                         )
                     },
                     totalText = checkoutTotalText,
@@ -196,6 +224,7 @@ class ShoppingListDetailViewModel @Inject constructor(
             is ShoppingListDetailEvent.OnCheckoutPick -> applyPick(event.itemId, event.optionId)
             ShoppingListDetailEvent.OnCheckoutPickerDismiss -> picker = null
             ShoppingListDetailEvent.OnCheckoutConfirm -> confirmCheckout()
+            ShoppingListDetailEvent.OnOpenPostedTransaction -> openPostedTransaction()
         }
     }
 
@@ -261,6 +290,22 @@ class ShoppingListDetailViewModel @Inject constructor(
                 canSave = true,
             )
         )
+        // The history hint is filled in afterwards because FormatMoneyUseCase is suspending. It is
+        // only a hint: the price box keeps whatever the item already had.
+        viewModelScope.launch {
+            val currency = listAccountId?.let { accountCurrencies[it] } ?: return@launch
+            val history = priceHistory(postedPrices, item.name, currency) ?: return@launch
+            val priceText = formatMoney.format(history.lastPrice, shortenAmount = false)
+            val dateText = with(timeConverter) { history.lastDate.toLocalDate() }.toString()
+            itemEditor = itemEditor
+                ?.takeIf { it.itemId == item.id }
+                ?.copy(
+                    historyPriceText = priceText,
+                    historyTimes = history.times,
+                    historyCurrency = history.currency,
+                    historyDateText = dateText,
+                )
+        }
     }
 
     private fun updateEditor(change: (ShoppingItemEditorViewState) -> ShoppingItemEditorViewState) {
@@ -330,6 +375,8 @@ class ShoppingListDetailViewModel @Inject constructor(
         drafts = emptyList()
         draftPrices = emptyMap()
         draftLineTotalTexts = emptyMap()
+        checkoutHistoryPriceTexts = emptyMap()
+        checkoutHistories = emptyMap()
         checkoutTotalText = ""
         refusedEmptyTotal = false
     }
@@ -433,16 +480,20 @@ class ShoppingListDetailViewModel @Inject constructor(
     }
 
     private suspend fun loadPickers() {
-        if (accounts.isEmpty()) {
-            accounts = accountRepository.findAll().map {
-                ShoppingPickOption(id = it.id.value, label = it.name.value)
-            }
-        }
+        ensureAccountsLoaded()
         if (categories.isEmpty()) {
             categories = categoryRepository.findAll().map {
                 ShoppingPickOption(id = it.id.value, label = it.name.value)
             }
         }
+    }
+
+    /** Accounts and their currencies, loaded once: a price is only comparable within one currency. */
+    private suspend fun ensureAccountsLoaded() {
+        if (accounts.isNotEmpty()) return
+        val loaded = accountRepository.findAll()
+        accounts = loaded.map { ShoppingPickOption(id = it.id.value, label = it.name.value) }
+        accountCurrencies = loaded.associate { it.id.value to it.asset.code }
     }
 
     /**
@@ -463,6 +514,20 @@ class ShoppingListDetailViewModel @Inject constructor(
         draftLineTotalTexts = resolved.associate {
             it.draft.itemId to formatMoney.format(it.amount, shortenAmount = false)
         }
+
+        // The "last paid" hint, restricted to the currency of the account this row is paid from.
+        // It is shown next to the price box and never copied into it.
+        val histories = mutableMapOf<UUID, PriceHistory>()
+        val historyTexts = mutableMapOf<UUID, String>()
+        for (draft in drafts) {
+            val accountId = draft.accountId ?: tripAccountId ?: continue
+            val currency = accountCurrencies[accountId] ?: continue
+            val history = priceHistory(postedPrices, draft.name, currency) ?: continue
+            histories[draft.itemId] = history
+            historyTexts[draft.itemId] = formatMoney.format(history.lastPrice, shortenAmount = false)
+        }
+        checkoutHistories = histories
+        checkoutHistoryPriceTexts = historyTexts
     }
 
     private suspend fun reload() {
@@ -486,7 +551,71 @@ class ShoppingListDetailViewModel @Inject constructor(
         isTemplate = list.isTemplateList()
         listAccountId = list.accountId
         items = shoppingItemDao.findByListId(id)
+        ensureAccountsLoaded()
         refreshFormattedTexts()
+        refreshPostedTransactionState()
+    }
+
+    /**
+     * Where this trip went, when it was posted.
+     *
+     * Only a trip whose items all point at the SAME transaction (single-transaction checkout) has one
+     * transaction to open. A trip posted one row per item has several, so the screen states the count
+     * instead of pretending one of them is "the" entry. A stamped id whose transaction no longer
+     * exists is reported as deleted, never offered as a dead entry point.
+     */
+    private suspend fun refreshPostedTransactionState() {
+        val transactionIds = items.mapNotNull { it.convertedTransactionId }.distinct()
+        postedEntryCount = transactionIds.size
+        val single = transactionIds.singleOrNull()
+        val exists = single != null &&
+            transactionRepository.findById(TransactionId(single)) != null
+        postedTransactionId = single?.takeIf { exists }
+        postedTransactionMissing = single != null && !exists
+    }
+
+    /** Opens the transaction the trip was posted to. Never called without a verified id. */
+    private fun openPostedTransaction() {
+        val id = postedTransactionId ?: return
+        navigation.navigateTo(
+            EditTransactionScreen(
+                initialTransactionId = id,
+                type = TransactionType.EXPENSE,
+            )
+        )
+    }
+
+    /**
+     * Everything that was really paid before, from the items that carry a transaction stamp.
+     *
+     * The currency of a purchase is the asset of the transaction it produced (the account's currency
+     * at the time), so history can be restricted to the same currency as the row being priced. An
+     * item whose transaction is gone cannot be attributed to a currency and is skipped - the hint
+     * would otherwise risk mixing currencies.
+     */
+    private suspend fun loadPostedPrices(): List<PostedItemPrice> {
+        val posted = shoppingItemDao.findAllPosted()
+        if (posted.isEmpty()) return emptyList()
+        val currencyByTransaction = mutableMapOf<UUID, String?>()
+        return posted.mapNotNull { item ->
+            val transactionId = item.convertedTransactionId ?: return@mapNotNull null
+            val price = item.unitPrice ?: return@mapNotNull null
+            if (!currencyByTransaction.containsKey(transactionId)) {
+                currencyByTransaction[transactionId] = transactionRepository
+                    .findById(TransactionId(transactionId))
+                    ?.getFromValue()
+                    ?.asset
+                    ?.code
+            }
+            val currency = currencyByTransaction[transactionId] ?: return@mapNotNull null
+            PostedItemPrice(
+                itemId = item.id.toString(),
+                name = item.name,
+                unitPrice = price,
+                currency = currency,
+                postedAt = item.checkedAt ?: item.dateTime,
+            )
+        }
     }
 
     /**

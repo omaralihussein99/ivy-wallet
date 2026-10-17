@@ -85,3 +85,49 @@ So added columns are nullable and null carries the meaning.
   `com.ivy.data.model`, not `.model.primitive`) was caught by the compiler and nowhere else.
 - Debug artefacts go to `C:\ivy-artifacts`, never into the repo.
 - `upstream` is fetch-only with pushes disabled on purpose. Push only to `origin`.
+
+## Tier 1 follow-up: the link both ways, and the price history
+
+Migration 132 stays frozen. Neither feature below added a column, an entity or a migration - both are
+reads over `shopping_items.convertedTransactionId`, which the checkout already stamps.
+
+### The transaction <-> trip link
+
+- **Transaction -> trip.** `EditTransactionViewModel.loadShoppingBreakdown` now also resolves
+  `ShoppingListDao.findById(items.first().listId)`. `ShoppingBreakdownViewState` carries `listId` and
+  `listName`; when the list still exists the breakdown header renders an **"Open list"** action
+  (`ShoppingBreakdown.kt`, `ShoppingItemsBreakdown(onOpenList = ...)`) that navigates to
+  `ShoppingListScreen(listId)`. When it does not exist (a deleted list, or an item whose list is
+  gone) `listId` is null and **no action is rendered** - never a dead entry point.
+- **Legacy transactions are unaffected by construction.** The breakdown is derived only from items
+  pointing at the transaction; a transaction whose description merely contains the words "Shopping
+  items" has no items, so `shoppingBreakdown` is null and neither the section nor the action exists.
+- **Trip -> transaction.** `ShoppingListDetailViewModel.refreshPostedTransactionState` groups the
+  trip's items by `convertedTransactionId`. Exactly one distinct id (single-transaction checkout) and
+  the transaction still resolves -> "Posted to ledger" opens it through
+  `EditTransactionScreen(initialTransactionId = ..., type = EXPENSE)`. More than one id (per-item
+  checkout) -> a plain, non-clickable "Posted as N ledger entries" line. One id whose transaction was
+  deleted -> a plain "Its ledger entry was deleted." line. Neither is clickable.
+
+### Per-item price history
+
+Pure logic lives in `feature/shopping/ShoppingPriceHistory.kt` (`priceHistory`,
+`normaliseItemName`) and is tested by `ShoppingPriceHistoryTest` (15 tests).
+
+- **Name normalisation: trim, collapse every whitespace run to one space, lowercase with
+  `Locale.ROOT`.** It is deliberately **not fuzzy**: "Milk", " milk " and "MILK" are the same
+  product, "Milk 2l" and "Milks" are not. Claiming a price for something the user did not buy would
+  be worse than showing no hint. The chosen rule is pinned by tests.
+- **Currency discipline: same-currency restriction *and* an explicit code in the hint.** An entry
+  only counts when the currency of the account it was posted to matches the currency of the row being
+  priced, and the hint says e.g. "Last paid 4.20 USD · 3 times". Historical prices are never
+  converted (that would compare today's money with yesterday's rate) and never mixed.
+- **Date and ties.** The latest `checkedAt` wins; on an exact tie the higher price wins (the hint must
+  not understate), and the item id is the final stable tie-breaker. The result carries `lastDate`
+  (shown in the item editor as a date); the checkout row shows price and count.
+- **It is a hint, never a value.** The price box is still seeded only from the item itself; the hint
+  never fills it, in either checkout mode. It is rendered in the checkout row and in the item editor
+  (when the list has an account, so the row's currency is known).
+- Source rows: `ShoppingItemDao.findAllPosted()` (items with a non-null
+  `convertedTransactionId`); the currency comes from the transaction's own asset
+  (`Transaction.getFromValue().asset`), not from today's account.

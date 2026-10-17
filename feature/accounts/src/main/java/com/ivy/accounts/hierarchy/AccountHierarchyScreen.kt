@@ -88,6 +88,28 @@ fun BoxWithConstraintsScope.AccountHierarchyScreenUi(
                     baseCurrency = viewState.baseCurrency,
                 )
 
+                if (viewState.currencySubtotals.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+
+                    CurrencySubtotals(
+                        subtotals = viewState.currencySubtotals,
+                        baseCurrency = viewState.baseCurrency,
+                    )
+                }
+
+                if (viewState.excludedCount > 0) {
+                    Spacer(Modifier.height(12.dp))
+
+                    Text(
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                        text = stringResource(
+                            R.string.account_hierarchy_excluded,
+                            viewState.excludedCount,
+                        ),
+                        style = UI.typo.nC.style(color = UI.colors.red),
+                    )
+                }
+
                 Spacer(Modifier.height(8.dp))
 
                 TransactionsDividerLine(paddingHorizontal = 24.dp)
@@ -101,6 +123,7 @@ fun BoxWithConstraintsScope.AccountHierarchyScreenUi(
                 items(items = viewState.rows, key = { it.id }) { row ->
                     AccountRow(
                         row = row,
+                        baseCurrency = viewState.baseCurrency,
                         onToggle = { onEvent(AccountHierarchyEvent.OnToggleExpand(row.id)) },
                         onSetParent = { onEvent(AccountHierarchyEvent.OnOpenParentPicker(row.id)) },
                     )
@@ -154,22 +177,93 @@ private fun GrandTotal(
             ),
         )
         Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = totalText,
-                style = UI.typo.nH1.style(
-                    color = UI.colors.pureInverse,
-                    fontWeight = FontWeight.ExtraBold
-                ).copy(fontSize = 30.sp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = baseCurrency,
-                style = UI.typo.nH1.style(
-                    color = UI.colors.pureInverse,
-                    fontWeight = FontWeight.Normal
-                ).copy(fontSize = 30.sp),
-            )
+        Text(
+            text = totalText,
+            style = UI.typo.nH1.style(
+                color = UI.colors.pureInverse,
+                fontWeight = FontWeight.ExtraBold
+            ).copy(fontSize = 30.sp),
+        )
+        Spacer(Modifier.height(4.dp))
+        // The rolled-up figures and this total are base-currency figures, never the parent's own
+        // currency - saying so next to them is what makes a mixed-currency tree readable.
+        Text(
+            text = stringResource(R.string.account_hierarchy_base_note, baseCurrency),
+            style = UI.typo.nC.style(color = UI.colors.gray),
+        )
+    }
+}
+
+/**
+ * The per-currency view of what the user holds.
+ *
+ * Each amount is native to its currency and comes from the accounts' OWN balances, so it is honest
+ * without any exchange rate. When a currency has no usable rate the whole currency is excluded from
+ * the base-currency total and says so, instead of being converted at 1:1 or counted as zero.
+ */
+@Composable
+private fun CurrencySubtotals(
+    subtotals: List<CurrencySubtotalViewState>,
+    baseCurrency: String,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            modifier = Modifier.padding(horizontal = 24.dp),
+            text = stringResource(R.string.account_hierarchy_by_currency).uppercase(),
+            style = UI.typo.c.style(
+                color = UI.colors.gray,
+                fontWeight = FontWeight.Bold
+            ),
+        )
+
+        subtotals.forEach { subtotal ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    modifier = Modifier.weight(1f),
+                    text = subtotal.currency,
+                    style = UI.typo.b2.style(
+                        color = UI.colors.pureInverse,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = subtotal.ownTotalText,
+                        style = UI.typo.b2.style(
+                            color = UI.colors.pureInverse,
+                            fontWeight = FontWeight.Medium
+                        ),
+                    )
+                    when {
+                        subtotal.baseTotalText != null && subtotal.currency != baseCurrency -> {
+                            Text(
+                                text = stringResource(
+                                    R.string.account_hierarchy_in_base,
+                                    subtotal.baseTotalText,
+                                ),
+                                style = UI.typo.nC.style(color = UI.colors.gray),
+                            )
+                        }
+
+                        subtotal.baseTotalText == null -> {
+                            Text(
+                                text = stringResource(R.string.account_hierarchy_no_rate_excluded),
+                                style = UI.typo.nC.style(color = UI.colors.red),
+                            )
+                        }
+
+                        else -> Unit
+                    }
+                }
+            }
         }
     }
 }
@@ -192,6 +286,7 @@ private fun EmptyState() {
 @Composable
 private fun AccountRow(
     row: AccountHierarchyRowViewState,
+    baseCurrency: String,
     onToggle: () -> Unit,
     onSetParent: () -> Unit,
 ) {
@@ -253,21 +348,36 @@ private fun AccountRow(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.Center,
         ) {
-            // Every row shows its OWN balance.
+            // Every row shows its OWN balance, in its OWN currency. It is never a rolled-up figure.
             Text(
                 text = stringResource(R.string.account_hierarchy_own, row.ownBalanceText),
                 style = UI.typo.nB2.style(color = UI.colors.gray),
             )
-            // A parent also shows a rolled-up figure, deliberately distinct from the own balance:
-            // different type scale, bold and in the primary colour.
-            if (row.hasChildren) {
-                Text(
-                    text = stringResource(R.string.account_hierarchy_rolled_up, row.rolledUpBalanceText),
-                    style = UI.typo.nB1.style(
-                        color = UI.colors.primary,
-                        fontWeight = FontWeight.Bold
-                    ),
-                )
+            when {
+                // No usable rate: the account's money is not in any base-currency figure, and the row
+                // says why instead of showing a converted or zeroed number.
+                row.noRate -> {
+                    Text(
+                        text = stringResource(R.string.account_hierarchy_no_rate),
+                        style = UI.typo.nB2.style(color = UI.colors.red),
+                    )
+                }
+
+                // A parent also shows a rolled-up figure, deliberately distinct from the own balance:
+                // different type scale, bold, in the primary colour and labelled as base currency.
+                row.hasChildren && row.rolledUpBalanceText != null -> {
+                    Text(
+                        text = stringResource(
+                            R.string.account_hierarchy_rolled_up_base,
+                            row.rolledUpBalanceText,
+                            baseCurrency,
+                        ),
+                        style = UI.typo.nB1.style(
+                            color = UI.colors.primary,
+                            fontWeight = FontWeight.Bold
+                        ),
+                    )
+                }
             }
         }
 

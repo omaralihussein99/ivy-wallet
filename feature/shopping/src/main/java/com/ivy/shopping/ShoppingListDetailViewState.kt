@@ -6,6 +6,19 @@ data class ShoppingListDetailViewState(
     val listName: String,
     val exists: Boolean,
     val isTemplate: Boolean,
+    /**
+     * The one transaction this trip was posted to, when it was posted as a single ledger row **and**
+     * that transaction still exists. Null means "no entry point" - never a dead one.
+     */
+    val postedTransactionId: UUID?,
+    /**
+     * How many distinct ledger transactions the trip's items point at. 0 = nothing posted yet;
+     * more than one = the trip was posted as one row per item, so there is no single transaction to
+     * open and the screen only states the fact.
+     */
+    val postedEntryCount: Int,
+    /** True when the trip was posted but the transaction it pointed at no longer exists. */
+    val postedTransactionDeleted: Boolean,
     val items: List<ShoppingItemRowViewState>,
     val itemsChecked: Int,
     val itemsTotal: Int,
@@ -49,6 +62,14 @@ data class ShoppingItemEditorViewState(
     val quantityText: String,
     /** False while a field holds something that is not a usable price/quantity. */
     val canSave: Boolean,
+    /**
+     * "Last paid" hint for this item, or null when it was never posted in the relevant currency.
+     * It is a hint only: it never fills the price box.
+     */
+    val historyPriceText: String? = null,
+    val historyTimes: Int = 0,
+    val historyCurrency: String? = null,
+    val historyDateText: String? = null,
 )
 
 /** One box per ticked item on the checkout sheet. */
@@ -63,6 +84,13 @@ data class ShoppingCheckoutRowViewState(
     /** True while the row has no usable price, so it will be skipped instead of posted as zero. */
     val skipped: Boolean,
     val hasAccount: Boolean,
+    /**
+     * What the user paid for this item before, in the row's own currency. A hint only - it is never
+     * used as the price and never auto-filled into [priceText].
+     */
+    val historyPriceText: String? = null,
+    val historyTimes: Int = 0,
+    val historyCurrency: String? = null,
 )
 
 data class ShoppingCheckoutViewState(
@@ -124,4 +152,7 @@ sealed interface ShoppingListDetailEvent {
     data class OnCheckoutPick(val itemId: UUID?, val optionId: UUID?) : ShoppingListDetailEvent
     data object OnCheckoutPickerDismiss : ShoppingListDetailEvent
     data object OnCheckoutConfirm : ShoppingListDetailEvent
+
+    /** Opens the ledger transaction the trip was posted to, when it still exists. */
+    data object OnOpenPostedTransaction : ShoppingListDetailEvent
 }

@@ -118,6 +118,9 @@ fun BoxWithConstraintsScope.EditTransactionScreen(screen: EditTransactionScreen)
         backgroundProcessing = uiState.backgroundProcessingStarted,
         customExchangeRateState = uiState.customExchangeRateState,
         shoppingBreakdown = uiState.shoppingBreakdown,
+        onOpenShoppingList = { listId ->
+            viewModel.onEvent(EditTransactionViewEvent.OnOpenShoppingList(listId))
+        },
 
         categories = uiState.categories,
         accounts = uiState.accounts,
@@ -236,6 +239,8 @@ private fun BoxWithConstraintsScope.UI(
     hasChanges: Boolean = false,
     /** Present only for a transaction a shopping trip produced. */
     shoppingBreakdown: ShoppingBreakdownViewState? = null,
+    /** Opens the shopping list behind [shoppingBreakdown], when it still exists. */
+    onOpenShoppingList: (UUID) -> Unit = {},
 
     ) {
     var chooseCategoryModalVisible by remember { mutableStateOf(false) }
@@ -390,7 +395,15 @@ private fun BoxWithConstraintsScope.UI(
         if (shoppingBreakdown != null) {
             Spacer(Modifier.height(20.dp))
 
-            ShoppingItemsBreakdown(state = shoppingBreakdown)
+            // The action is offered only when the list still resolves; a legacy transaction with the
+            // words "Shopping items" in its description has no breakdown at all, so it gets no
+            // entry point either.
+            ShoppingItemsBreakdown(
+                state = shoppingBreakdown,
+                onOpenList = shoppingBreakdown.listId
+                    ?.let { raw -> runCatching { UUID.fromString(raw) }.getOrNull() }
+                    ?.let { listId -> { onOpenShoppingList(listId) } },
+            )
         }
 
         if (transactionType == TransactionType.TRANSFER && customExchangeRateState.showCard) {

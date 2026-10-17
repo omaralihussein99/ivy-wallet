@@ -1,5 +1,6 @@
 package com.ivy.transaction
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -19,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.ivy.design.l0_system.UI
 import com.ivy.design.l0_system.style
 import com.ivy.ui.R
+import com.ivy.wallet.ui.theme.components.IvyIcon
 import kotlin.math.round
 
 /**
@@ -44,22 +47,64 @@ data class ShoppingBreakdownRow(
 data class ShoppingBreakdownViewState(
     val rows: List<ShoppingBreakdownRow>,
     val totalText: String,
+    /**
+     * The shopping list this transaction came from, when it still exists. Null means there is no
+     * trip to open (a legacy transaction, or a list that has since been deleted), so no "Open list"
+     * action is rendered at all - never a dead one.
+     */
+    val listId: String? = null,
+    val listName: String? = null,
 )
 
 @Composable
 internal fun ShoppingItemsBreakdown(
     state: ShoppingBreakdownViewState,
     modifier: Modifier = Modifier,
+    onOpenList: (() -> Unit)? = null,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            modifier = Modifier.padding(horizontal = 24.dp),
-            text = stringResource(R.string.shopping_items_breakdown),
-            style = UI.typo.nB2.style(
-                color = UI.colors.mediumInverse,
-                fontWeight = FontWeight.SemiBold,
-            ),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                modifier = Modifier.weight(1f),
+                text = stringResource(R.string.shopping_items_breakdown),
+                style = UI.typo.nB2.style(
+                    color = UI.colors.mediumInverse,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+
+            // Only offered when the list still resolves, so the action always leads somewhere.
+            if (state.listId != null && onOpenList != null) {
+                Row(
+                    modifier = Modifier
+                        .clip(UI.shapes.rFull)
+                        .clickable(onClick = onOpenList)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.shopping_open_list),
+                        style = UI.typo.nB2.style(
+                            color = UI.colors.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+
+                    Spacer(Modifier.width(4.dp))
+
+                    IvyIcon(
+                        icon = R.drawable.ic_arrow_right,
+                        tint = UI.colors.primary,
+                        contentDescription = stringResource(R.string.shopping_open_list),
+                    )
+                }
+            }
+        }
 
         Spacer(Modifier.height(8.dp))
 

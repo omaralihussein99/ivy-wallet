@@ -19,6 +19,7 @@ import com.ivy.base.time.TimeProvider
 import com.ivy.data.db.dao.read.LoanDao
 import com.ivy.data.db.dao.read.SettingsDao
 import com.ivy.data.db.dao.read.ShoppingItemDao
+import com.ivy.data.db.dao.read.ShoppingListDao
 import com.ivy.data.model.Category
 import com.ivy.data.model.CategoryId
 import com.ivy.data.model.Tag
@@ -43,6 +44,7 @@ import com.ivy.legacy.utils.uiThread
 import com.ivy.navigation.EditTransactionScreen
 import com.ivy.navigation.MainScreen
 import com.ivy.navigation.Navigation
+import com.ivy.navigation.ShoppingListScreen
 import com.ivy.ui.ComposeViewModel
 import com.ivy.ui.FormatMoneyUseCase
 import com.ivy.ui.R
@@ -106,6 +108,7 @@ class EditTransactionViewModel @Inject constructor(
     private val tagRepository: TagRepository,
     private val tagMapper: TagMapper,
     private val shoppingItemDao: ShoppingItemDao,
+    private val shoppingListDao: ShoppingListDao,
     /**
      * The only thing allowed to render money: it knows the user's decimal and grouping settings.
      */
@@ -216,6 +219,10 @@ class EditTransactionViewModel @Inject constructor(
         val items = shoppingItemDao.findByConvertedTransactionId(transactionId)
         if (items.isEmpty()) return null
 
+        // The trip that produced this transaction. The list may have been deleted since, in which
+        // case there is nothing to open and no action is offered.
+        val list = shoppingListDao.findById(items.first().listId)
+
         val rows = items.map { item ->
             val price = item.unitPrice
             ShoppingBreakdownRow(
@@ -233,6 +240,8 @@ class EditTransactionViewModel @Inject constructor(
         return ShoppingBreakdownViewState(
             rows = rows,
             totalText = formatMoney.format(transactionAmount, shortenAmount = false),
+            listId = list?.id?.toString(),
+            listName = list?.name,
         )
     }
 
@@ -369,6 +378,9 @@ class EditTransactionViewModel @Inject constructor(
     @Suppress("CyclomaticComplexMethod")
     override fun onEvent(event: EditTransactionViewEvent) {
         when (event) {
+            is EditTransactionViewEvent.OnOpenShoppingList ->
+                nav.navigateTo(ShoppingListScreen(listId = event.listId))
+
             is EditTransactionViewEvent.CreateAccount -> createAccount(event.data)
             is EditTransactionViewEvent.CreateCategory -> createCategory(event.data)
             EditTransactionViewEvent.Delete -> delete()

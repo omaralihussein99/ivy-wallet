@@ -13,6 +13,7 @@ import com.ivy.wallet.domain.deprecated.logic.model.CreateCategoryData
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableSet
 import java.time.Instant
+import java.util.UUID
 import java.time.LocalDateTime
 
 @Immutable
@@ -44,6 +45,9 @@ data class EditTransactionViewState(
 )
 
 sealed interface EditTransactionViewEvent {
+    /** Opens the shopping list this transaction was produced by. */
+    data class OnOpenShoppingList(val listId: UUID) : EditTransactionViewEvent
+
     data class OnAmountChanged(val newAmount: Double) : EditTransactionViewEvent
     data class OnTitleChanged(val newTitle: String?) : EditTransactionViewEvent
     data class OnDescriptionChanged(val newDescription: String?) : EditTransactionViewEvent

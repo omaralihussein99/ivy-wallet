@@ -24,6 +24,12 @@ data class HierarchyNode(
     val parentId: AccountId? = null,
     val ownBalance: BigDecimal = BigDecimal.ZERO,
     val orderNum: Double = 0.0,
+    /**
+     * The account's own currency (ISO code). It is needed to decide whether mixing this account
+     * into a base-currency figure is honest at all - see `HierarchyCurrency.kt`. Defaulted so the
+     * original hierarchy rules (which are currency-agnostic) keep working unchanged.
+     */
+    val currency: String = "",
 )
 
 /** A flattened tree row: which account it is, where it sits and what it is worth. */

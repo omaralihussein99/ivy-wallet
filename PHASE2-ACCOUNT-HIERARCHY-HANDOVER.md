@@ -88,3 +88,65 @@ real edit round-trip. `:app:compileDemoKotlin` is app-level evidence, but it is 
 - Debug artefacts go to `C:\ivy-artifacts`, never into the repo.
 - Verify with a build before claiming anything works.
 - `upstream` is fetch-only with pushes disabled on purpose. Push only to `origin`.
+
+## Tier 1 follow-up: currency safety
+
+Migration 132 stays frozen. No column, entity or migration was added; the screen reads the existing
+`accounts.asset` and `exchange_rates` rows.
+
+Pure rules live in `shared/data/core/src/main/java/com/ivy/data/hierarchy/HierarchyCurrency.kt`
+(`RateTable`, `valorise`, `currencySubtotals`, `baseRolledUpBalances`, `baseGrandTotal`,
+`accountsExcludedFromBaseTotal`) and are tested by `HierarchyCurrencyTest` (15 tests).
+
+### Two questions, two numbers - never one
+
+- **Per-currency subtotals are native.** `currencySubtotals` groups each account by its OWN currency
+  and sums its OWN balance. Own balances are disjoint, so this never double counts a child - it
+  answers "how much do I hold in EUR", not "what is the tree worth". Every subtotal is labelled with
+  its currency code (e.g. `EUR 50.00`).
+- **Rolled-up and grand-total figures are base currency.** Each account's own balance is converted
+  through `RateTable`, then the existing roll-up runs. The screen labels the grand total and every
+  rolled-up row explicitly as base currency (`Rolled up: 1,300.00 USD · USD base`, and the note
+  "Rolled-up and total figures are in USD (base currency).").
+- **The double-count rule is unchanged.** `baseGrandTotal` is still the sum of the ROOT accounts'
+  rolled-up balances; a child is inside its parent's figure and a parent is never added twice.
+  `HierarchyCurrencyTest` asserts 130 for parent 100 + child 30 and explicitly asserts that the naive
+  160 is NOT the total, so either regression fails a test.
+- **An excluded parent does not hide a usable child.** The roll-up walks through an account that has
+  no rate, so a USD child of a EUR parent is still counted in the base total.
+
+### Missing and stale rates - the definition
+
+`exchange_rates` stores `(baseCurrency, currency, rate, manualOverride)` and **no timestamp**. The
+existing model therefore cannot express the age of a rate, so it cannot age one out. The only trust
+signals it carries are:
+
+1. the row exists for the pair, or for the reciprocal pair (1 EUR = 1.25 USD <=> 1 USD = 0.8 EUR);
+2. the value survives the same rule the rest of the app uses (`PositiveDouble` / `validateRate`):
+   finite and strictly greater than zero.
+
+**Stale, in this model, therefore means "not usable as a price":** no row, a zero/negative/NaN/
+infinite value, or a row whose base/currency pair is unrelated to the question. Missing and stale are
+deliberately the same outcome, because the model cannot tell them apart. `manualOverride` rows are
+trusted like any other: a user-entered rate is deliberate, and there is no timestamp with which to
+call it old.
+
+Consequences, all tested:
+
+- such an account is **excluded** from every base-currency figure - never counted as 0, never
+  converted at 1:1;
+- its row shows the marker **"no rate"**;
+- its currency subtotal keeps the native amount (that money is real) but says
+  **"no rate · excluded from base total"** and contributes nothing to the base total;
+- the screen states how many accounts were excluded, so a total is never silently partial.
+
+If a real age ever becomes available, the honest place to add it is `RateTable`/`RateRow` (a timestamp
+plus a horizon). That would need migration 133, which this batch deliberately did not add.
+
+### Rendering
+
+`AccountHierarchyScreen` shows, under the grand total: the base-currency note, the per-currency
+subtotals, the excluded-accounts note, then the tree. Rows show the native own balance with its
+currency code; a parent's rolled-up figure is separately labelled as base; an account without a rate
+shows "no rate" instead of a rolled-up number. All of it uses `UI.colors`/`UI.typo` and the existing
+Ivy components - the Material3 sweep of this screen was not undone.

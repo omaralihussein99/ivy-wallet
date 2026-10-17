@@ -363,6 +363,7 @@
     <string name="shopping">Shopping</string>
     <string name="shopping_items_breakdown">Shopping items</string>
     <string name="shopping_items_total">Total</string>
+    <string name="shopping_open_list">Open list</string>
     <string name="gifts">Gifts</string>
     <string name="health">Health</string>
     <string name="investments">Investments</string>
@@ -513,6 +514,13 @@
     <string name="account_hierarchy_close">Close</string>
     <string name="account_hierarchy_expand">Expand</string>
     <string name="account_hierarchy_collapse">Collapse</string>
+    <string name="account_hierarchy_base_note">Rolled-up and total figures are in %1$s (base currency).</string>
+    <string name="account_hierarchy_by_currency">By currency</string>
+    <string name="account_hierarchy_in_base">= %1$s base</string>
+    <string name="account_hierarchy_rolled_up_base">Rolled up: %1$s · %2$s base</string>
+    <string name="account_hierarchy_no_rate">no rate</string>
+    <string name="account_hierarchy_no_rate_excluded">no rate · excluded from base total</string>
+    <string name="account_hierarchy_excluded">%1$d account(s) have no usable exchange rate and are not in the base total.</string>
 
     <!-- Local automatic backups (on-device backup list, manual backup, restore) -->
     <string name="backups_entry">Backups</string>

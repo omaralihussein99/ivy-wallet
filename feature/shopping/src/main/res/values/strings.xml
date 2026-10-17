@@ -47,4 +47,15 @@
     <string name="item_quantity">Quantity</string>
     <string name="save">Save</string>
     <string name="item_editor_no_price_hint">Leave the price empty to keep it as "not priced yet".</string>
+
+    <!-- What was paid before. A hint, never the value of the price box. -->
+    <string name="price_history_once">Last paid %1$s %2$s</string>
+    <string name="price_history_many">Last paid %1$s %2$s · %3$d times</string>
+    <string name="price_history_on_once">Last paid %1$s %2$s on %3$s</string>
+    <string name="price_history_on_many">Last paid %1$s %2$s on %3$s · %4$d times</string>
+
+    <!-- Where a posted trip went. Only shown when the transaction still exists. -->
+    <string name="posted_to_ledger">Posted to ledger</string>
+    <string name="posted_to_ledger_multiple">Posted as %1$d ledger entries</string>
+    <string name="posted_to_ledger_deleted">Its ledger entry was deleted.</string>
 </resources>

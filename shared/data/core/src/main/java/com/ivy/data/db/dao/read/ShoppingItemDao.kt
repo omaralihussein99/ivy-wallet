@@ -32,4 +32,18 @@ interface ShoppingItemDao {
             "AND isDeleted = 0 ORDER BY orderNum ASC"
     )
     suspend fun findByConvertedTransactionId(transactionId: UUID): List<ShoppingItemEntity>
+
+    /**
+     * Every item that really reached the ledger, i.e. that carries the transaction id stamped when
+     * its trip was posted.
+     *
+     * This is the source of the "last paid" hint. An item that was only planned, skipped as unpriced
+     * or still sits on an open trip has no stamp, so it is not a purchase and must not be treated as
+     * one. No new column is needed: the stamp already exists.
+     */
+    @Query(
+        "SELECT * FROM shopping_items WHERE convertedTransactionId IS NOT NULL " +
+            "AND isDeleted = 0 ORDER BY orderNum ASC"
+    )
+    suspend fun findAllPosted(): List<ShoppingItemEntity>
 }

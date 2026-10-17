@@ -2,28 +2,33 @@ package com.ivy.accounts.hierarchy
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewModelScope
-import arrow.core.toOption
 import com.ivy.data.hierarchy.HierarchyNode
 import com.ivy.data.hierarchy.ParentAssignment
-import com.ivy.data.hierarchy.grandTotal
+import com.ivy.data.hierarchy.RateRow
+import com.ivy.data.hierarchy.RateTable
+import com.ivy.data.hierarchy.accountsExcludedFromBaseTotal
+import com.ivy.data.hierarchy.baseGrandTotal
+import com.ivy.data.hierarchy.baseRolledUpBalances
 import com.ivy.data.hierarchy.hierarchyRows
 import com.ivy.data.hierarchy.parentCandidates
 import com.ivy.data.hierarchy.validateParentAssignment
 import com.ivy.data.hierarchy.visibleRows
+import com.ivy.data.hierarchy.currencySubtotals as computeCurrencySubtotals
 import com.ivy.data.model.Account
 import com.ivy.data.model.AccountId
 import com.ivy.data.repository.AccountRepository
+import com.ivy.data.repository.ExchangeRatesRepository
 import com.ivy.navigation.Navigation
 import com.ivy.ui.ComposeViewModel
 import com.ivy.ui.FormatMoneyUseCase
 import com.ivy.wallet.domain.action.account.CalcAccBalanceAct
-import com.ivy.wallet.domain.action.exchange.ExchangeAct
 import com.ivy.wallet.domain.action.settings.BaseCurrencyAct
-import com.ivy.wallet.domain.pure.exchange.ExchangeData
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.util.UUID
@@ -33,16 +38,21 @@ import javax.inject.Inject
  * The account-hierarchy screen.
  *
  * All hierachy maths is delegated to the pure rules in `com.ivy.data.hierarchy`; this class only
- * loads accounts, works out each account's OWN balance in the base currency and formats the numbers
- * with Ivy's `FormatMoneyUseCase`. Every balance stays a `BigDecimal` until it is handed to the
- * formatter - the one place Ivy's formatter accepts a `Double` - so no `Double` arithmetic touches
- * money.
+ * loads accounts and rates, works out what each number means and formats it with Ivy's
+ * `FormatMoneyUseCase`. Every balance stays a `BigDecimal` until it is handed to the formatter - the
+ * one place Ivy's formatter accepts a `Double` - so no `Double` arithmetic touches money.
+ *
+ * Two different questions are answered separately, on purpose:
+ *  - each row's own balance is shown **in its own currency** (native, never converted);
+ *  - rolled-up and grand-total figures are shown in the **base currency**, and an account whose
+ *    currency has no usable rate is excluded from them and marked "no rate" instead of being
+ *    counted as 0 or converted at 1:1.
  */
 @HiltViewModel
 class AccountHierarchyViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val calcAccBalanceAct: CalcAccBalanceAct,
-    private val exchangeAct: ExchangeAct,
+    private val exchangeRatesRepository: ExchangeRatesRepository,
     private val baseCurrencyAct: BaseCurrencyAct,
     private val formatMoney: FormatMoneyUseCase,
     private val navigation: Navigation,
@@ -51,6 +61,8 @@ class AccountHierarchyViewModel @Inject constructor(
     private var rows by mutableStateOf<List<AccountHierarchyRowViewState>>(emptyList())
     private var totalText by mutableStateOf("")
     private var baseCurrency by mutableStateOf("")
+    private var subtotals by mutableStateOf<List<CurrencySubtotalViewState>>(emptyList())
+    private var excludedCount by mutableIntStateOf(0)
 
     private var pickerVisible by mutableStateOf(false)
     private var pickerAccountId by mutableStateOf<AccountId?>(null)
@@ -59,6 +71,7 @@ class AccountHierarchyViewModel @Inject constructor(
 
     private var accounts by mutableStateOf<List<Account>>(emptyList())
     private var hierarchyNodes: List<HierarchyNode> = emptyList()
+    private var rateTable: RateTable = RateTable(baseCurrency = "")
     private var collapsed by mutableStateOf<Set<AccountId>>(emptySet())
 
     init {
@@ -70,6 +83,8 @@ class AccountHierarchyViewModel @Inject constructor(
         rows = rows,
         totalText = totalText,
         baseCurrency = baseCurrency,
+        currencySubtotals = subtotals,
+        excludedCount = excludedCount,
         parentPickerVisible = pickerVisible,
         parentPickerAccountId = pickerAccountId?.value,
         parentPickerAccountName = accounts.firstOrNull { it.id == pickerAccountId }?.name?.value.orEmpty(),
@@ -92,12 +107,27 @@ class AccountHierarchyViewModel @Inject constructor(
     private suspend fun reload() {
         baseCurrency = baseCurrencyAct(Unit)
         accounts = accountRepository.findAll()
+        // The rate model has no timestamp, so "usable" is the only freshness signal it carries.
+        // `HierarchyCurrency.kt` documents this and makes the decision.
+        rateTable = RateTable(
+            baseCurrency = baseCurrency,
+            rows = exchangeRatesRepository.findAll().first().map { rate ->
+                RateRow(
+                    baseCurrency = rate.baseCurrency.code,
+                    currency = rate.currency.code,
+                    rate = rate.rate.value,
+                )
+            },
+        )
         hierarchyNodes = accounts.map { account ->
             HierarchyNode(
                 id = account.id,
                 parentId = account.parentAccountId,
-                ownBalance = ownBalanceInBaseCurrency(account, baseCurrency),
+                // OWN balance, in the account's own currency: conversion happens in the pure rules,
+                // and a missing rate excludes the account instead of zeroing it.
+                ownBalance = calcAccBalanceAct(CalcAccBalanceAct.Input(account = account)).balance,
                 orderNum = account.orderNum,
+                currency = account.asset.code,
             )
         }
         // A parent that is gone must not leave a stale "collapsed" flag behind.
@@ -109,24 +139,51 @@ class AccountHierarchyViewModel @Inject constructor(
         val nameById: Map<AccountId, String> = accounts.associate { it.id to it.name.value }
         if (hierarchyNodes.isEmpty()) {
             rows = emptyList()
-            totalText = formatMoneyText(BigDecimal.ZERO)
+            totalText = formatMoneyText(BigDecimal.ZERO, baseCurrency)
+            subtotals = emptyList()
+            excludedCount = 0
             return
         }
 
+        val excluded = accountsExcludedFromBaseTotal(hierarchyNodes, rateTable)
+        val rolledUp = baseRolledUpBalances(hierarchyNodes, rateTable)
+        val currencyById = accounts.associate { it.id to it.asset.code }
+
         rows = visibleRows(hierarchyRows(hierarchyNodes), collapsed).map { row ->
+            val currency = currencyById[row.id].orEmpty()
+            val noRate = row.id in excluded
             AccountHierarchyRowViewState(
                 id = row.id.value,
                 name = nameById[row.id].orEmpty(),
                 depth = row.depth,
-                ownBalanceText = formatMoneyText(row.ownBalance),
-                rolledUpBalanceText = formatMoneyText(row.rolledUpBalance),
+                // Native, in the account's own currency - clearly not a rolled-up figure.
+                ownBalanceText = formatMoneyText(row.ownBalance, currency),
+                currency = currency,
+                // Base currency, labelled. Null when there is no usable rate: the UI marks it.
+                rolledUpBalanceText = if (noRate) {
+                    null
+                } else {
+                    formatMoneyText(rolledUp[row.id] ?: row.ownBalance, baseCurrency)
+                },
                 parentName = row.parentId?.let { nameById[it] },
                 hasChildren = row.hasChildren,
                 expanded = row.hasChildren && collapsed.none { it == row.id },
+                noRate = noRate,
             )
         }
-        // Roots only - a child is already inside its parent's rolled-up figure.
-        totalText = formatMoneyText(grandTotal(hierarchyNodes))
+        // Roots only - a child is already inside its parent's rolled-up figure, and excluded
+        // accounts are not in it at all.
+        totalText = formatMoneyText(baseGrandTotal(hierarchyNodes, rateTable), baseCurrency)
+        excludedCount = excluded.size
+        subtotals = computeCurrencySubtotals(hierarchyNodes, rateTable).map { subtotal ->
+            CurrencySubtotalViewState(
+                currency = subtotal.currency,
+                ownTotalText = formatMoneyText(subtotal.ownTotal, subtotal.currency),
+                baseTotalText = subtotal.ownTotalInBase
+                    ?.let { formatMoneyText(it, baseCurrency) },
+                includedInBaseTotal = subtotal.includedInBaseTotal,
+            )
+        }
     }
 
     private fun toggleExpand(accountId: UUID) {
@@ -183,32 +240,12 @@ class AccountHierarchyViewModel @Inject constructor(
     // ------------------------------------------------------------------ money
 
     /**
-     * The account's own balance, converted to the base currency. Own means this account alone - the
-     * children are added by the roll-up, never here.
+     * Formats an amount with Ivy's formatter and appends the currency code it is expressed in, so a
+     * number can never be read as if it were in another currency. The symbol is not added: Ivy's
+     * formatter only knows the user's decimal and grouping settings, and the code is unambiguous.
      */
-    private suspend fun ownBalanceInBaseCurrency(account: Account, baseCurrency: String): BigDecimal {
-        val own = calcAccBalanceAct(CalcAccBalanceAct.Input(account = account)).balance
-        if (own.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO
-        if (account.asset.code == baseCurrency) return own
-
-        // An account whose currency cannot be exchanged is left at zero rather than valued at a
-        // made-up rate; the total then understates instead of lying.
-        return exchangeAct(
-            ExchangeAct.Input(
-                data = ExchangeData(
-                    baseCurrency = baseCurrency,
-                    fromCurrency = account.asset.code.toOption(),
-                    toCurrency = baseCurrency,
-                ),
-                amount = own,
-            )
-        ).orNull() ?: BigDecimal.ZERO
+    private suspend fun formatMoneyText(value: BigDecimal, currency: String): String {
+        val text = formatMoney.format(value.toDouble(), shortenAmount = false)
+        return if (currency.isBlank()) text else "$text $currency"
     }
-
-    /**
-     * The single place a balance becomes a `Double`: Ivy's formatter takes one. No arithmetic happens
-     * here, and every sum above stayed a `BigDecimal`.
-     */
-    private suspend fun formatMoneyText(value: BigDecimal): String =
-        formatMoney.format(value.toDouble(), shortenAmount = false)
 }

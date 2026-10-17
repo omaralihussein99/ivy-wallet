@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
@@ -58,6 +59,7 @@ import com.ivy.wallet.ui.theme.components.DeleteButton
 import com.ivy.wallet.ui.theme.components.IvyBorderButton
 import com.ivy.wallet.ui.theme.components.IvyButton
 import com.ivy.wallet.ui.theme.components.IvyCheckbox
+import com.ivy.wallet.ui.theme.components.IvyIcon
 import com.ivy.wallet.ui.theme.components.IvyChecklistTextField
 import com.ivy.wallet.ui.theme.components.IvyDividerLine
 import com.ivy.wallet.ui.theme.components.IvyNumberTextField
@@ -134,7 +136,7 @@ fun BoxWithConstraintsScope.ShoppingListScreenUi(
                 }
             } else {
                 item {
-                    Header(viewState = viewState)
+                    Header(viewState = viewState, onEvent = onEvent)
                 }
 
                 item {
@@ -202,7 +204,10 @@ fun BoxWithConstraintsScope.ShoppingListScreenUi(
 }
 
 @Composable
-private fun Header(viewState: ShoppingListDetailViewState) {
+private fun Header(
+    viewState: ShoppingListDetailViewState,
+    onEvent: (ShoppingListDetailEvent) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -253,6 +258,72 @@ private fun Header(viewState: ShoppingListDetailViewState) {
                 fontWeight = FontWeight.ExtraBold
             ),
         )
+
+        PostedToLedger(viewState = viewState, onEvent = onEvent)
+    }
+}
+
+/**
+ * Where the trip went.
+ *
+ * It is a real action only when there is exactly one transaction and it still exists. A per-item trip
+ * just says how many ledger rows it became, and a deleted transaction says so - neither is a dead
+ * entry point.
+ */
+@Composable
+private fun PostedToLedger(
+    viewState: ShoppingListDetailViewState,
+    onEvent: (ShoppingListDetailEvent) -> Unit,
+) {
+    when {
+        viewState.postedTransactionId != null -> {
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier
+                    .clip(UI.shapes.rFull)
+                    .clickable { onEvent(ShoppingListDetailEvent.OnOpenPostedTransaction) }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IvyIcon(
+                    icon = IvyUiR.drawable.ic_arrow_right,
+                    tint = UI.colors.primary,
+                    contentDescription = stringResource(R.string.posted_to_ledger),
+                )
+
+                Spacer(Modifier.width(8.dp))
+
+                Text(
+                    text = stringResource(R.string.posted_to_ledger),
+                    style = UI.typo.nB2.style(
+                        color = UI.colors.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+            }
+        }
+
+        viewState.postedEntryCount > 1 -> {
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                text = stringResource(
+                    R.string.posted_to_ledger_multiple,
+                    viewState.postedEntryCount,
+                ),
+                style = UI.typo.nC.style(color = UI.colors.gray),
+            )
+        }
+
+        viewState.postedTransactionDeleted -> {
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                text = stringResource(R.string.posted_to_ledger_deleted),
+                style = UI.typo.nC.style(color = UI.colors.gray),
+            )
+        }
     }
 }
 
@@ -480,6 +551,29 @@ private fun BoxScope.ItemEditorModal(
                     onEvent(ShoppingListDetailEvent.OnEditorQuantityChange(newValue.text))
                 }
             }
+        }
+
+        val historyPrice = editor.historyPriceText
+        if (historyPrice != null) {
+            Spacer(Modifier.height(12.dp))
+
+            val historyCurrency = editor.historyCurrency.orEmpty()
+            val historyDate = editor.historyDateText.orEmpty()
+            Text(
+                modifier = Modifier.padding(horizontal = 32.dp),
+                text = if (editor.historyTimes == 1) {
+                    stringResource(R.string.price_history_on_once, historyPrice, historyCurrency, historyDate)
+                } else {
+                    stringResource(
+                        R.string.price_history_on_many,
+                        historyPrice,
+                        historyCurrency,
+                        historyDate,
+                        editor.historyTimes,
+                    )
+                },
+                style = UI.typo.nC.style(color = UI.colors.primary),
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -767,6 +861,27 @@ private fun CheckoutRow(
 
             Text(
                 text = row.quantityText,
+                style = UI.typo.nC.style(color = UI.colors.gray),
+            )
+        }
+
+        // The history hint sits next to the price it describes, but it never fills it in.
+        val historyPrice = row.historyPriceText
+        if (historyPrice != null) {
+            Spacer(Modifier.height(4.dp))
+
+            val historyCurrency = row.historyCurrency.orEmpty()
+            Text(
+                text = if (row.historyTimes == 1) {
+                    stringResource(R.string.price_history_once, historyPrice, historyCurrency)
+                } else {
+                    stringResource(
+                        R.string.price_history_many,
+                        historyPrice,
+                        historyCurrency,
+                        row.historyTimes,
+                    )
+                },
                 style = UI.typo.nC.style(color = UI.colors.gray),
             )
         }
