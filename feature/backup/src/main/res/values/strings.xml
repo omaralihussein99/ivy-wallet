@@ -24,5 +24,7 @@
     <string name="restore_not_found">That backup is gone.</string>
     <string name="restore_not_usable">That file is not a usable database.</string>
     <string name="restore_failed">The restore failed. Nothing was changed.</string>
-    <string name="restore_restarting">Restored. The app is restarting.</string>
+    <!-- True of the chosen relaunch mechanism: an alarm-clock alarm fires ~1s after the swap and
+         the app comes back by itself, no tapping required. -->
+    <string name="restore_restarting">Restored. The app restarts itself in a moment.</string>
 </resources>

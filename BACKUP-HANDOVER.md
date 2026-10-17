@@ -126,8 +126,9 @@ transaction that was committed when it was taken.*
 5. The old sidecars (`-wal`, `-shm`, `-journal`) are deleted: they belong to the database being
    replaced and would otherwise be replayed into the restored file.
 6. One atomic `rename(2)` (atomic on the same file system) replaces `ivywallet.db`.
-7. An `AlarmManager` alarm (which outlives the process) relaunches the app, and the process is killed
-   with `exitProcess(0)`.
+7. An **alarm-clock alarm** (`AlarmManager.setAlarmClock`, which outlives the process and which the
+   platform is not allowed to defer) relaunches the app, and the process is killed with
+   `exitProcess(0)`.
 
 **What this does about the live database and in-memory state:** the file is replaced wholesale, so
 there is no half-applied state to fall back to — either the rename happened or it did not, and steps
@@ -140,6 +141,35 @@ removes every piece of stale in-memory state (DAO caches in other singletons, Co
 **Confirmation:** restore is behind the same typed-confirmation gate the app already uses for
 destructive actions (`DeleteConfirmationModal`'s typed delete button): the Restore button stays
 disabled until the user has typed the backup's file name exactly.
+
+### Why `setAlarmClock` and not a plain alarm (fixed after an on-device defect)
+
+The first implementation used `AlarmManager.set(context, RTC, now + 1s, pendingIntent)`. That is an
+**inexact** alarm: API 31+ is free to defer it, and in Doze/app-standby it can be batched
+indefinitely. Verified on the API 36 test device: after a restore the database swap was correct but
+the app never came back — `pidof com.ivy.wallet.debug` was empty at +12 s and still empty at +3.5
+minutes, with the launcher in front. The user had to open the app by hand.
+
+`setAlarmClock` is now the one and only relaunch mechanism (`LocalBackupRepository.scheduleRelaunch`):
+
+* **It cannot be deferred.** An alarm-clock alarm is exact, exempt from Doze and app-standby
+  deferral, and the platform may not batch it.
+* **It needs no permission.** From API 31, `setExactAndAllowWhileIdle` throws `SecurityException`
+  unless the app holds `SCHEDULE_EXACT_ALARM`, and an app targeting 33+ only holds it after the user
+  granted "Alarms & reminders". This app declares no such permission and has no request flow, so
+  `canScheduleExactAlarms()` is `false` here by construction: gating on it would mean the exact branch
+  is never taken and every restore would fall back to a deferrable alarm again. `setAlarmClock` is
+  allowed on API 28-36 with no permission at all.
+* **It outlives the process.** The alarm is held by the system. A `Handler`-based relaunch cannot
+  work: the handler dies with the process, and a `startActivity` from this process is cancelled by the
+  same `exitProcess(0)` that makes the relaunch necessary.
+
+Cost, stated plainly: while the alarm is pending, the platform lists it in the system "next alarm"
+slot, so an alarm icon is visible for about a second.
+
+Fallback: if `setAlarmClock` ever throws (not observed on API 28-36), a `setAndAllowWhileIdle` alarm is
+scheduled and the degradation is logged at error level. **That fallback is still deferrable** — it
+exists only so a replaced database never ends with nothing scheduled at all.
 
 ---
 
@@ -196,12 +226,14 @@ locale-independent. If money is ever displayed on this screen it must go through
 
 ## What is NOT verified
 
-* **No APK was built and nothing was installed.** `:app:assembleDemo` was deliberately not run, only
-  `:app:compileDemoKotlin`. No emulator or device was touched in this phase.
-* **No backup was ever taken at runtime.** That a scheduled job actually fires, that the file lands in
-  the folder, and that the rotation deletes the right files on a real device are all unverified.
-* **No restore was ever performed.** The rename, the alarm relaunch and `exitProcess(0)` are argued from
-  the code and the platform contract, not observed.
+* **In this phase** no APK was built and nothing was installed: `:app:assembleDemo` was not run, only
+  `:app:compileDemoKotlin`. (The later restore-fix phase did build and install; see below.)
+* **No backup was taken at runtime in this phase.** That a scheduled job actually fires, that the file
+  lands in the folder, and that the rotation deletes the right files on a real device were unverified
+  here; the restore-fix phase took and restored real backups on the emulator.
+* **No restore was performed in this phase.** The rename, the relaunch and `exitProcess(0)` were argued
+  from the code and the platform contract. They were later exercised on the API 36 emulator and the
+  plain-alarm defect above was found that way.
 * **The WAL behaviour was not observed against a real on-device database.** The checkpoint's result,
   the "is `-wal` empty" check and the failure path that refuses to write a stale backup are reasoned
   about, and the pure parts are unit tested, but the Android-side file IO has no test.

@@ -3,7 +3,6 @@ package com.ivy.backup
 import androidx.annotation.StringRes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -48,6 +47,7 @@ import com.ivy.design.l0_system.style
 import com.ivy.legacy.utils.hideKeyboard
 import com.ivy.navigation.screenScopedViewModel
 import com.ivy.ui.R as IvyUiR
+import com.ivy.wallet.ui.theme.Gradient
 import com.ivy.wallet.ui.theme.components.BackBottomBar
 import com.ivy.wallet.ui.theme.components.CircleButtonFilled
 import com.ivy.wallet.ui.theme.components.DeleteButton
@@ -186,13 +186,15 @@ private fun BackupCard(
     onRestore: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    // Settings-style card: 16dp side gutters, `r4` corners and a 2dp medium border.
+    // Settings-style FILLED card, copied from `SettingsButtonRow` in :feature/settings: 16dp side
+    // gutters, `r4` corners and a solid `UI.colors.medium` fill with NO outline. (The shopping-list
+    // rows deliberately copy `CategoriesScreen` instead, which is outlined; these rows must not.)
     Row(
         modifier = Modifier
             .padding(horizontal = 16.dp)
             .fillMaxWidth()
             .clip(UI.shapes.r4)
-            .border(2.dp, UI.colors.medium, UI.shapes.r4)
+            .background(Gradient.solid(UI.colors.medium).asHorizontalBrush(), UI.shapes.r4)
             .clickable(enabled = enabled, onClick = onRestore)
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -1,9 +1,12 @@
 # Design pass — handover (part 1: plumbing + hierarchy + backups, part 2: shopping)
 
-Status: **compiles, unit tests green, visual parity NOT verified.**
-No app build (`:app:assembleDemo`) and no screenshots were produced in either part; visual parity is
-deferred to the app build that follows the full pass. Part 2 (the three shopping screens) is in
-section 8.
+Status: **compiles, unit tests green, visual parity VERIFIED on device — with one deviation that has
+since been fixed (9.2).**
+The app build (`:app:assembleDemo`) and the emulator run that this document deferred have since been
+done: all five rebuilt screens match their reference screens in light, dark and AMOLED, with black-box
+screenshots under `C:\ivy-artifacts\verify\` (see 9.1). The one honest deviation — the backups rows
+were drawn as **outlined** cards instead of the Settings **filled** treatment — was corrected in the
+restore-fix follow-up (9.2). Part 2 (the three shopping screens) is in section 8.
 
 ## 0. Reconciliation performed before any edit
 
@@ -73,7 +76,7 @@ and "No parent" as the always-present first option.
 | `<no background>` on non-legacy destination | root `background(UI.colors.pure)` |
 | no page title | `UI.typo.h2` title, matching `SettingsScreen` |
 | "Back up now" in the toolbar | `BackBottomBar { IvyButton(text = ..., iconStart = ic_save, enabled = !isBusy) }` |
-| `HorizontalDivider` row separators | Settings-style cards: 16dp gutters, `UI.shapes.r4`, 2dp `UI.colors.medium` border, 12dp gaps |
+| `HorizontalDivider` row separators | Settings-style **filled** cards: 16dp gutters, `UI.shapes.r4`, solid `UI.colors.medium` fill (`Gradient.solid(UI.colors.medium).asHorizontalBrush()`), **no border**, 12dp gaps (corrected — see 9.2) |
 | `titleMedium` timestamp | `UI.typo.b2` Bold `UI.colors.pureInverse` |
 | `bodySmall` `size · filename` | `UI.typo.nB2` gray 14sp |
 | `TextButton` restore + `IconButton` delete | whole card clickable → restore (gated on `!isBusy`), trailing `DeleteButton()` |
@@ -118,9 +121,15 @@ messages.
 
 ## 7. What is NOT verified
 
-- **Visual parity is not verified.** No app build and no screenshots were produced in this part.
-- No device/emulator run; behaviour of the two modals, the back-handler stack and the keyboard
-  shifting is verified only by compilation and by reading the legacy component implementations.
+- **Visual parity — this section is now out of date, and the answer is positive.** The app build and
+  the emulator run did happen afterwards: all five rebuilt screens match their reference screens in
+  light, dark and AMOLED (sampled backgrounds RGB(17,17,20) in dark and RGB(0,0,0) in AMOLED), with
+  black-box screenshots under `C:\ivy-artifacts\verify\`. The one deviation that was found — the
+  backups rows had a 2dp `UI.colors.medium` outline instead of the Settings filled card — is fixed;
+  see 9.2.
+- Device behaviour of the two modals, the back-handler stack and the keyboard shifting was exercised
+  during that emulator run (the screens are usable end to end), but there is still no automated UI
+  test for them.
 - `feature/accounts` and `feature/home` contain Paparazzi screenshot suites; they were not run in
   this pass (Paparazzi needs a supported graphics environment and is unrelated to the two new
   screens). The only unit tests executed were `:feature:shopping:testDebugUnitTest` (51 tests), used
@@ -253,8 +262,12 @@ usages are `BoxScope` extensions, which `BoxWithConstraintsScope` already is.
 
 ### 8.8 What part 2 does NOT verify
 
-- No app build and no screenshots: visual parity with Categories/Settings is unproven.
-- Dark / AMOLED rendering of `pure` (which is the whole point of the explicit background) is unproven.
+- ~~No app build and no screenshots: visual parity with Categories/Settings is unproven.~~ Superseded:
+  the app build and the emulator run happened later; the shopping screens match their references in
+  light, dark and AMOLED (`C:\ivy-artifacts\verify\`). Their outlined cards are intentional (they
+  copy `CategoriesScreen`) and were left untouched.
+- ~~Dark / AMOLED rendering of `pure` is unproven.~~ Superseded: sampled backgrounds were
+  RGB(17,17,20) in dark and RGB(0,0,0) in AMOLED.
 - Modal runtime behaviour is unproven: the shared scroll state swap between the review and the picker,
   the keyboard shifting inside `IvyModal`, and the back-handler stack for the two modals were checked
   only by reading `IvyModal` and by compilation.
@@ -262,3 +275,30 @@ usages are `BoxScope` extensions, which `BoxWithConstraintsScope` already is.
   single-line `OutlinedTextField` did not. Not observed on a device.
 - The taller cards (b1 title + 14sp subtitle + 16dp gaps) were not measured against a real screen.
 - Arabic/RTL were not touched, per the owner's English-only decision.
+
+## 9. Verification pass and the restore-fix follow-up
+
+### 9.1 What the app build and the device run established
+
+- `:app:assembleDemo` succeeded and the demo APK was installed on `MAUI_Emulator_API_36` (API 36).
+  The screenshots are black-box captures of the running app (not layout inspection) and live under
+  `C:\ivy-artifacts\verify\`.
+- All five rebuilt screens match their reference screens in **light**, **dark** and **AMOLED**;
+  sampled backgrounds were RGB(17,17,20) in dark and RGB(0,0,0) in AMOLED, i.e. the explicit
+  `background(UI.colors.pure)` on the non-legacy destinations is really applied.
+- The shopping-list cards are **outlined** on purpose — they copy `CategoriesScreen` — and were judged
+  correct in that run. They are deliberately **not** changed by 9.2.
+
+### 9.2 The one deviation that was fixed
+
+The backups rows were white with a 2dp `UI.colors.medium` outline, while the Settings reference
+(`SettingsButtonRow`, `feature/settings/src/main/java/com/ivy/settings/SettingsScreen.kt:1013-1038`)
+uses grey **filled** cards with no visible border. `BackupCard` now mirrors `SettingsButtonRow`:
+
+- `feature/backup/src/main/java/com/ivy/backup/BackupsScreen.kt:189-198` — `clip(UI.shapes.r4)` plus
+  `background(Gradient.solid(UI.colors.medium).asHorizontalBrush(), UI.shapes.r4)`; the
+  `border(2.dp, UI.colors.medium, ...)` call and the now-unused `androidx.compose.foundation.border`
+  import are gone.
+
+Nothing else on the screen was restyled: same gutters (16dp), same `r4` corners, same typography, same
+click target, same 12dp gaps.
